@@ -1,0 +1,164 @@
+{
+  "clear-day": {
+    "size": 256885
+  },
+  "clear-night": {
+    "size": 207544
+  },
+  "code-blue": {
+    "size": 43599
+  },
+  "code-green": {
+    "size": 42774
+  },
+  "code-orange": {
+    "size": 42137
+  },
+  "code-red": {
+    "size": 42817
+  },
+  "code-yellow": {
+    "size": 42072
+  },
+  "drizzle": {
+    "size": 136435
+  },
+  "dust-day": {
+    "size": 215855
+  },
+  "dust-night": {
+    "size": 201526
+  },
+  "dust": {
+    "size": 128593
+  },
+  "extreme-rain": {
+    "size": 170309
+  },
+  "extreme-snow": {
+    "size": 179231
+  },
+  "fog-day": {
+    "size": 103580
+  },
+  "fog-night": {
+    "size": 105263
+  },
+  "hail": {
+    "size": 139020
+  },
+  "haze": {
+    "size": 134235
+  },
+  "mist": {
+    "size": 33067
+  },
+  "not-available": {
+    "size": 34057
+  },
+  "overcast-day": {
+    "size": 203601
+  },
+  "overcast-night": {
+    "size": 180776
+  },
+  "partly-cloudy-day-rain": {
+    "size": 190209
+  },
+  "partly-cloudy-day-snow": {
+    "size": 200264
+  },
+  "partly-cloudy-day": {
+    "size": 177642
+  },
+  "partly-cloudy-night-rain": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 168890
+  },
+  "partly-cloudy-night-snow": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 179775
+  },
+  "partly-cloudy-night": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 156337
+  },
+  "rain": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 137463
+  },
+  "sleet": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 160380
+  },
+  "snow": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 148165
+  },
+  "thunderstorms-day-rain": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 226524
+  },
+  "thunderstorms-night-rain": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 204341
+  },
+  "tornado": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 41292
+  },
+  "wind": {
+    "frames": 60,
+    "cols": 20,
+    "rows": 3,
+    "sheetW": 2560,
+    "sheetH": 384,
+    "fps": 10,
+    "size": 42582
+  }
+}

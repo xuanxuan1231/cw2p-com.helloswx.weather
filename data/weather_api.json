@@ -1,0 +1,277 @@
+{
+  "location_api": {
+    "ip_geolocation": {
+      "name": "Ip-location",
+      "url": "http://ip-api.com/json/",
+      "method": "GET",
+      "timeout": 10,
+      "params": {
+        "fields": "status,lat,lon"
+      },
+      "response_format": {
+        "success_field": "status",
+        "success_value": "success",
+        "latitude_field": "lat",
+        "longitude_field": "lon",
+        "error_field": "message"
+      }
+    }
+  },
+  "city_api": {
+    "xiaomi_location": {
+      "name": "City-location",
+      "url": "https://weatherapi.market.xiaomi.com/wtr-v3/location/city/geo",
+      "method": "GET",
+      "timeout": 10,
+      "params": {
+        "latitude": "{latitude}",
+        "longitude": "{longitude}",
+        "appKey": "weather20151024",
+        "sign": "zUFJoAR2ZVrDy1vF3D07",
+        "locale": "{locale}"
+      },
+      "response_format": {
+        "data_path": "0",
+        "city_key_field": "key",
+        "location_key_field": "locationKey",
+        "city_name_field": "name",
+        "affiliation_field": "affiliation",
+        "latitude_field": "latitude",
+        "longitude_field": "longitude"
+      }
+    }
+  },
+  "weather_api": {
+    "xiaomi_weather": {
+      "name": "小米天气",
+      "url": "https://weatherapi.market.xiaomi.com/wtr-v3/weather/all?latitude={latitude}&longitude={longitude}&locationKey={location_key}&appKey=weather20151024&sign=zUFJoAR2ZVrDy1vF3D07&isGlobal=false&locale={locale}&days={days}",
+      "supports_coordinates": true
+    },
+    "qweather": {
+      "name": "和风天气",
+      "url": "https://devapi.qweather.com/v7/weather/now?location={location_key}&key={key}",
+      "supports_coordinates": false
+    },
+    "qweather_air": {
+      "name": "和风天气空气质量",
+      "url": "https://devapi.qweather.com/v7/air/now?location={location_key}&key={key}",
+      "supports_coordinates": false
+    },
+    "qweather_air_coordinates": {
+      "name": "和风天气空气质量(经纬度)",
+      "url": "https://devapi.qweather.com/v7/air/now?location={longitude},{latitude}&key={key}",
+      "supports_coordinates": true
+    },
+    "qweather_alert": {
+      "name": "和风天气预警",
+      "url": "https://devapi.qweather.com/v7/warning/now?location={location_key}&key={key}",
+      "supports_coordinates": false
+    },
+    "qweather_alert_coordinates": {
+      "name": "和风天气预警(经纬度)",
+      "url": "https://devapi.qweather.com/v7/warning/now?location={longitude},{latitude}&key={key}",
+      "supports_coordinates": true
+    },
+    "amap_weather": {
+      "name": "高德天气",
+      "url": "https://restapi.amap.com/v3/weather/weatherInfo?key={key}&city={location_key}",
+      "supports_coordinates": false
+    },
+    "qq_weather": {
+      "name": "腾讯天气",
+      "url": "https://apis.map.qq.com/ws/weather/v1?key={key}&adcode={location_key}",
+      "supports_coordinates": false
+    },
+    "open_meteo": {
+      "name": "Open-Meteo天气",
+      "url": "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,surface_pressure,visibility&hourly=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,surface_pressure,visibility&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=7",
+      "supports_coordinates": true
+    },
+    "open_meteo_air_quality": {
+      "name": "Open-Meteo空气质量",
+      "url": "https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&current=carbon_monoxide,nitrogen_dioxide,ozone,pm10,pm2_5,sulphur_dioxide&timezone=auto",
+      "supports_coordinates": true
+    }
+  },
+  "weather_api_parameters": {
+    "xiaomi_weather": {
+      "temp": "current.temperature.value",
+      "icon": "current.weather",
+      "alerts": {
+        "url": null,
+        "title": "alerts.0.title",
+        "type": "alerts.0.level",
+        "description": "alerts.0.detail",
+        "types": {
+          "蓝色": "blue.png",
+          "黄色": "yellow.png",
+          "橙色": "orange.png",
+          "红色": "red.png"
+        }
+      },
+      "database": "xiaomi_weather.db",
+      "return_desc": false,
+      "method": "coordinates",
+      "supports_coordinates": true,
+      "hourly_forecast": {
+        "url": "https://weatherapi.market.xiaomi.com/wtr-v3/weather/all?latitude={latitude}&longitude={longitude}&locationKey={location_key}&appKey=weather20151024&sign=zUFJoAR2ZVrDy1vF3D07&isGlobal=false&locale={locale}&days=1",
+        "data_path": "forecastHourly",
+        "fields": {
+          "temperature": "temperature.value.{index}",
+          "weather_code": "weather.value.{index}",
+          "hour": "{index}"
+        }
+      },
+      "daily_forecast": {
+        "url": "https://weatherapi.market.xiaomi.com/wtr-v3/weather/all?latitude={latitude}&longitude={longitude}&locationKey={location_key}&appKey=weather20151024&sign=zUFJoAR2ZVrDy1vF3D07&isGlobal=false&locale={locale}&days={days}",
+        "data_path": "forecastDaily",
+        "fields": {
+          "temp_high": "temperature.value.{index}.to",
+          "temp_low": "temperature.value.{index}.from",
+          "weather_day": "weather.value.{index}.from",
+          "weather_night": "weather.value.{index}.to"
+        }
+      }
+    },
+    "qweather": {
+      "temp": "now.temp",
+      "icon": "now.icon",
+      "alerts": {
+        "url": "https://devapi.qweather.com/v7/warning/now?location={location_key}&key={key}",
+        "title": "warning.0.title",
+        "description": "warning.0.text",
+        "type": "warning.0.severityColor",
+        "types": {
+          "Blue": "blue.png",
+          "Yellow": "yellow.png",
+          "Orange": "orange.png",
+          "Red": "red.png"
+        }
+      },
+      "database": "xiaomi_weather.db",
+      "return_desc": false,
+      "method": "location_key",
+      "supports_coordinates": true,
+      "hourly_forecast": {
+        "url": "https://devapi.qweather.com/v7/weather/24h?location={location_key}&key={key}",
+        "data_path": "hourly",
+        "fields": {
+          "fxTime": "fxTime",
+          "temp": "temp",
+          "icon": "icon",
+          "text": "text",
+          "wind360": "wind360",
+          "windDir": "windDir",
+          "windScale": "windScale",
+          "windSpeed": "windSpeed",
+          "humidity": "humidity",
+          "pop": "pop",
+          "precip": "precip",
+          "pressure": "pressure",
+          "cloud": "cloud",
+          "dew": "dew"
+        }
+      },
+      "daily_forecast": {
+        "url": "https://devapi.qweather.com/v7/weather/7d?location={location_key}&key={key}",
+        "data_path": "daily",
+        "fields": {
+          "fxDate": "fxDate",
+          "sunrise": "sunrise",
+          "sunset": "sunset",
+          "moonrise": "moonrise",
+          "moonset": "moonset",
+          "moonPhase": "moonPhase",
+          "moonPhaseIcon": "moonPhaseIcon",
+          "tempMax": "tempMax",
+          "tempMin": "tempMin",
+          "iconDay": "iconDay",
+          "textDay": "textDay",
+          "iconNight": "iconNight",
+          "textNight": "textNight",
+          "wind360Day": "wind360Day",
+          "windDirDay": "windDirDay",
+          "windScaleDay": "windScaleDay",
+          "windSpeedDay": "windSpeedDay",
+          "wind360Night": "wind360Night",
+          "windDirNight": "windDirNight",
+          "windScaleNight": "windScaleNight",
+          "windSpeedNight": "windSpeedNight",
+          "humidity": "humidity",
+          "precip": "precip",
+          "pressure": "pressure",
+          "vis": "vis",
+          "cloud": "cloud",
+          "uvIndex": "uvIndex"
+        }
+      }
+    },
+    "amap_weather": {
+      "temp": "temperature",
+      "icon": "weather",
+      "alerts": {},
+      "database": "amap_weather.db",
+      "return_desc": true,
+      "method": "location_key",
+      "supports_coordinates": false
+    },
+    "qq_weather": {
+      "temp": "temperature",
+      "icon": "weather",
+      "alerts": {},
+      "database": "amap_weather.db",
+      "return_desc": true,
+      "method": "location_key",
+      "supports_coordinates": false
+    },
+    "open_meteo": {
+      "temp": "current",
+      "icon": "weather",
+      "alerts": {},
+      "database": "amap_weather.db",
+      "return_desc": false,
+      "method": "coordinates",
+      "supports_coordinates": true,
+      "hourly_forecast": {
+        "url": "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,surface_pressure,visibility&hourly=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,surface_pressure,visibility&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=7",
+        "data_path": "hourly",
+        "fields": {
+          "time": "time",
+          "temperature": "temperature",
+          "weather_code": "weather_code",
+          "apparent_temperature": "apparent_temperature",
+          "humidity": "humidity",
+          "wind_speed": "wind_speed",
+          "wind_direction": "wind_direction",
+          "pressure": "pressure",
+          "visibility": "visibility",
+          "precipitation": "precipitation"
+        }
+      },
+      "daily_forecast": {
+        "url": "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,surface_pressure,visibility&hourly=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,surface_pressure,visibility&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=7",
+        "data_path": "daily",
+        "fields": {
+          "date": "date",
+          "temp_max": "temp_max",
+          "temp_min": "temp_min",
+          "weather_code": "weather_code"
+        }
+      }
+    }
+  },
+  "weather_api_list": [
+    "xiaomi_weather",
+    "qweather",
+    "amap_weather",
+    "qq_weather",
+    "open_meteo"
+  ],
+  "weather_api_list_zhCN": [
+    "小米天气",
+    "和风天气 (需 API Key)",
+    "高德天气 (需 API Key)",
+    "腾讯天气 (需 API Key)",
+    "Open-Meteo"
+  ]
+}

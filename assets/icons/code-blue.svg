@@ -1,0 +1,13 @@
+<svg width="56" height="51" viewBox="0 0 56 51" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="56" height="51" fill="#EEEEEE"/>
+<g id="code-blue">
+<g id="code-red__code-red">
+<g id="code-red__Alarm">
+<g id="Frame">
+<path id="code-red__Exclamation" d="M22.5658 3.06C24.8588 -1.02 30.7328 -1.02 33.0258 3.06L54.8127 41.816C57.0617 45.816 54.1708 50.756 49.5828 50.756H6.00875C1.42075 50.756 -1.47025 45.816 0.778753 41.816L22.5658 3.06Z" fill="#0A5AD4"/>
+</g>
+<path id="code-red__ExclamationMark" d="M29.0596 32.406H26.5696L25.1596 24.036V18.396H30.4396V24.036L29.0596 32.406ZM30.4696 39.756H25.1296V34.746H30.4696V39.756Z" fill="white"/>
+</g>
+</g>
+</g>
+</svg>
