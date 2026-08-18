@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        type: boolean
+        default: true
+      version:
+        type: string
 
 jobs:
   release:
@@ -52,7 +59,12 @@ jobs:
       
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+        run: |
+          if [ ${{ github.event_name == 'workflow_dispatch' ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+          fi
       
       - name: Generate changelog with git-cliff
         id: generate_changelog
