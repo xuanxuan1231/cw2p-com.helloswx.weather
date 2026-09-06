@@ -19,6 +19,9 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
