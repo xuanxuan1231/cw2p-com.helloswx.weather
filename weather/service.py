@@ -1,11 +1,12 @@
 """抓取编排：把提供商返回的 :class:`Snapshot` 整理成 QML 直接可用的数据。"""
 
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 from PySide6.QtCore import QThread, Signal
 
 from . import codes
-from .cities import CityRepository
+from .cities import CityRepository, coordinates_for_city
 from .config import WeatherConfig
 from .models import CITY, COORDINATES, Location, Snapshot
 from .providers import ProviderError, WeatherProvider, create, get_provider_class, provider_classes
@@ -19,6 +20,12 @@ _SEVERITY_RANK = {"red": 3, "orange": 2, "yellow": 1, "blue": 0}
 
 
 def location_from_config(config: WeatherConfig) -> Location:
+    if not (config.city_code or config.latitude is not None or config.longitude is not None):
+        cities = getattr(config, "cities", None) or []
+        default_id = getattr(config, "default_city_id", "")
+        city = next((item for item in cities if str(item.get("id")) == str(default_id)), None) or (cities[0] if cities else None)
+        if city:
+            return location_from_city(city, config.provider)
     code = config.city_code or ""
     name = ""
     mode = config.location_mode or CITY
@@ -39,6 +46,106 @@ def location_from_config(config: WeatherConfig) -> Location:
         latitude=config.latitude,
         longitude=config.longitude,
     )
+
+
+def normalize_city(city: Dict[str, Any], provider_id: str = "") -> Dict[str, Any]:
+    """Return a stable, JSON-friendly city record used across providers."""
+    record = dict(city or {})
+    record.setdefault("id", str(uuid4()))
+    record["id"] = str(record["id"])
+    record["name"] = str(record.get("name") or "").replace(".", " ")
+    record["mode"] = str(record.get("mode") or (COORDINATES if not record.get("code") else CITY))
+    if record.get("latitude") is not None:
+        record["latitude"] = float(record["latitude"])
+    if record.get("longitude") is not None:
+        record["longitude"] = float(record["longitude"])
+    if record.get("latitude") is None or record.get("longitude") is None:
+        coordinates = coordinates_for_city(record["name"])
+        if coordinates:
+            record["latitude"], record["longitude"] = coordinates
+    codes = dict(record.get("provider_codes") or {})
+    if provider_id and record.get("code"):
+        codes.setdefault(provider_id, str(record["code"]))
+    record["provider_codes"] = {str(key): str(value) for key, value in codes.items() if value not in (None, "")}
+    record.pop("code", None)
+    return record
+
+
+def migrate_cities(config: WeatherConfig) -> List[Dict[str, Any]]:
+    """Migrate the legacy single-location fields into the city list once."""
+    cities = [normalize_city(item, config.provider) for item in (config.cities or [])]
+    if not cities and (config.city_code or config.city_name or config.latitude is not None):
+        legacy_name = config.city_name
+        if not legacy_name and config.city_code:
+            repository = repository_for(config.provider)
+            if repository:
+                legacy_name = repository.name_for_code(config.city_code)
+        cities = [normalize_city({
+            "name": legacy_name,
+            "code": config.city_code,
+            "mode": config.location_mode,
+            "latitude": config.latitude,
+            "longitude": config.longitude,
+        }, config.provider)]
+    config.cities = cities
+    if cities and (not config.default_city_id or config.default_city_id not in {item["id"] for item in cities}):
+        config.default_city_id = cities[0]["id"]
+    return cities
+
+
+def city_for_provider(city: Dict[str, Any], provider_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve a normalized city to the current provider's location fields."""
+    record = normalize_city(city)
+    provider_class = get_provider_class(provider_id)
+    has_coordinates = record.get("latitude") is not None and record.get("longitude") is not None
+    if record["mode"] == COORDINATES and provider_class and provider_class.supports_coordinates and has_coordinates:
+        return record
+    code = (record.get("provider_codes") or {}).get(provider_id, "")
+    if not code and provider_id:
+        repository = repository_for(provider_id)
+        if repository and record.get("name"):
+            matches = repository.search(record["name"], limit=1)
+            if matches:
+                code = matches[0]["code"]
+                record["provider_codes"][provider_id] = str(code)
+    if not code:
+        if provider_class and provider_class.supports_coordinates and has_coordinates:
+            record["mode"] = COORDINATES
+            return record
+        return None
+    record["mode"] = CITY
+    record["code"] = str(code)
+    return record
+
+
+def location_from_city(city: Dict[str, Any], provider_id: str) -> Location:
+    resolved = city_for_provider(city, provider_id)
+    if not resolved:
+        return Location(name=str((city or {}).get("name") or ""))
+    return Location(
+        mode=str(resolved.get("mode") or CITY),
+        code=str(resolved.get("code") or ""),
+        name=str(resolved.get("name") or ""),
+        latitude=resolved.get("latitude"),
+        longitude=resolved.get("longitude"),
+    )
+
+
+def sync_legacy_location(config: WeatherConfig, city: Optional[Dict[str, Any]]) -> None:
+    """Keep legacy fields usable for older plugin/widget code and upgrades."""
+    if not city:
+        config.location_mode = CITY
+        config.city_code = ""
+        config.city_name = ""
+        config.latitude = None
+        config.longitude = None
+        return
+    resolved = city_for_provider(city, config.provider) or normalize_city(city)
+    config.location_mode = str(resolved.get("mode") or CITY)
+    config.city_code = str(resolved.get("code") or "")
+    config.city_name = str(resolved.get("name") or "")
+    config.latitude = resolved.get("latitude")
+    config.longitude = resolved.get("longitude")
 
 
 def _format_temperature(value: Optional[float]) -> str:

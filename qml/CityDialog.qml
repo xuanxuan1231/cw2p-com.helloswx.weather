@@ -9,7 +9,7 @@ Dialog {
     property var backend
     property var info
 
-    title: qsTr("选择城市")
+    title: qsTr("添加城市")
     modal: true
     implicitWidth: 560
 
@@ -91,6 +91,9 @@ Dialog {
             provinceSelector.currentIndex = 0
             // 默认"全部"：加载所有城市
             availableCities = backend.citiesIn(-1)
+        } else if (backend) {
+            // 坐标型数据源也内置直辖市和省会，空搜索时直接展示。
+            availableCities = backend.citiesIn(-1)
         }
     }
 
@@ -113,7 +116,7 @@ Dialog {
 
         if (query === "") {
             searchInProgress = false
-            availableCities = []
+            availableCities = backend.citiesIn(-1)
             return
         }
 
@@ -129,7 +132,7 @@ Dialog {
         const count = root.filteredCities.length
         if (count === 0) {
             if (!hasLocalCityList && root.searchText.trim() === "") {
-                return qsTr("输入城市名开始搜索")
+                return qsTr("暂无推荐城市")
             }
             return qsTr("没有匹配的城市")
         }
@@ -358,14 +361,20 @@ Dialog {
             if (root.useCoordinateInput) {
                 const lat = parseFloat(latitudeInput.text)
                 const lon = parseFloat(longitudeInput.text)
-                backend.setCoordinates(lat, lon, "")
+                backend.addCityRecord({
+                    "name": "",
+                    "mode": "coordinates",
+                    "latitude": lat,
+                    "longitude": lon
+                })
             } else if (root.currentSelection) {
-                backend.setCity(
-                    root.currentSelection.code ?? "",
-                    root.currentSelection.name ?? "",
-                    parseFloat(root.currentSelection.latitude ?? 0) || 0,
-                    parseFloat(root.currentSelection.longitude ?? 0) || 0
-                )
+                backend.addCityRecord({
+                    "name": root.currentSelection.name ?? "",
+                    "code": root.currentSelection.code ?? "",
+                    "mode": root.currentSelection.mode ?? "city",
+                    "latitude": parseFloat(root.currentSelection.latitude ?? 0) || null,
+                    "longitude": parseFloat(root.currentSelection.longitude ?? 0) || null
+                })
             }
 
             root.close()

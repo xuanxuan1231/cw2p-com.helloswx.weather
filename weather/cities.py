@@ -1,11 +1,47 @@
 """城市数据库查询（data/*.db 来自 Class Widgets）。"""
 
-import sqlite3
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import cysqlite
 
 from pypinyin import Style, lazy_pinyin
 
 from . import DATA_DIR
+
+
+# Used by coordinate-only providers so the add-city dialog is useful before
+# the first online search. Database-backed providers still expose their full
+# local list; these records also make provider switching deterministic.
+MAJOR_CHINESE_CITIES = [
+    ("北京", 39.9042, 116.4074), ("天津", 39.3434, 117.3616),
+    ("上海", 31.2304, 121.4737), ("重庆", 29.5630, 106.5516),
+    ("石家庄", 38.0428, 114.5149), ("太原", 37.8706, 112.5489),
+    ("呼和浩特", 40.8426, 111.7492), ("沈阳", 41.8057, 123.4315),
+    ("长春", 43.8171, 125.3235), ("哈尔滨", 45.8038, 126.5349),
+    ("南京", 32.0603, 118.7969), ("杭州", 30.2741, 120.1551),
+    ("合肥", 31.8206, 117.2272), ("福州", 26.0745, 119.2965),
+    ("南昌", 28.6820, 115.8579), ("济南", 36.6512, 117.1201),
+    ("郑州", 34.7466, 113.6254), ("武汉", 30.5928, 114.3055),
+    ("长沙", 28.2282, 112.9388), ("广州", 23.1291, 113.2644),
+    ("南宁", 22.8170, 108.3669), ("海口", 20.0440, 110.1999),
+    ("成都", 30.5728, 104.0668), ("贵阳", 26.6470, 106.6302),
+    ("昆明", 25.0389, 102.7183), ("拉萨", 29.6500, 91.1000),
+    ("西安", 34.3416, 108.9398), ("兰州", 36.0611, 103.8343),
+    ("西宁", 36.6171, 101.7782), ("银川", 38.4872, 106.2309),
+    ("乌鲁木齐", 43.8256, 87.6168),
+]
+_MAJOR_COORDINATES = {name: (latitude, longitude) for name, latitude, longitude in MAJOR_CHINESE_CITIES}
+
+
+def coordinates_for_city(name: str) -> Optional[Tuple[float, float]]:
+    return _MAJOR_COORDINATES.get(_display_name(str(name or "")))
+
+
+def built_in_cities() -> List[Dict[str, Any]]:
+    return [
+        _city_dict(name, "", None) | {"mode": "coordinates", "latitude": lat, "longitude": lon}
+        for name, lat, lon in MAJOR_CHINESE_CITIES
+    ]
 
 
 def _display_name(raw: str) -> str:
@@ -21,12 +57,15 @@ def _pinyin(text: str) -> Tuple[str, str]:
     return full, abbr
 
 
-def _city_dict(name: str, code: str, province_id: int | None = None) -> Dict[str, str]:
+def _city_dict(name: str, code: str, province_id: int | None = None) -> Dict[str, Any]:
     display = _display_name(name)
     full, abbr = _pinyin(name)
-    d: Dict[str, str] = {"name": display, "code": str(code), "pinyin": full, "pinyin_abbr": abbr}
+    d: Dict[str, Any] = {"name": display, "code": str(code), "pinyin": full, "pinyin_abbr": abbr}
     if province_id is not None:
         d["province_id"] = province_id
+    coordinates = _MAJOR_COORDINATES.get(display)
+    if coordinates:
+        d["latitude"], d["longitude"] = coordinates
     return d
 
 
@@ -37,10 +76,12 @@ class CityRepository:
         self.database = database
         self._path = DATA_DIR / database
 
-    def _connect(self) -> Optional[sqlite3.Connection]:
+    def _connect(self) -> Optional[cysqlite.Connection]:
         if not self._path.exists():
             return None
-        return sqlite3.connect(f"file:{self._path}?mode=ro", uri=True)
+        # Use cysqlite's native read-only flag so the bundled database cannot
+        # be modified by the plugin.
+        return cysqlite.connect(str(self._path), flags=cysqlite.SQLITE_OPEN_READONLY)
 
     def provinces(self) -> List[str]:
         connection = self._connect()

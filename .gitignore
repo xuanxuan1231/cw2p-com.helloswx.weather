@@ -10,3 +10,4 @@ build/
 *.egg-info/
 *.cwplugin
 RinUI/
+AGENTS.md

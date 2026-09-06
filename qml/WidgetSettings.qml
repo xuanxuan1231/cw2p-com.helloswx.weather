@@ -7,6 +7,60 @@ import ClassWidgets.Plugins
 SettingsLayout {
     id: layout
 
+    // WidgetSettings is loaded inside the widgets window, whose context does
+    // not expose PluginBackendBridge. Read the persisted plugin model through
+    // the standard CW2 Configs context instead.
+    property var backend: null
+    ListModel { id: cityModel }
+
+    Component.onCompleted: reloadCities()
+
+    function reloadCities() {
+        cityModel.clear()
+        cityModel.append({"text": qsTr("跟随默认城市"), "value": ""})
+        let cities = []
+        if (backend && backend.cityOptions) {
+            cities = backend.cityOptions()
+        } else if (typeof Configs !== "undefined" && Configs.data) {
+            const rootConfig = Configs.data
+            const pluginConfigs = rootConfig.plugins && rootConfig.plugins.configs
+            const pluginConfig = pluginConfigs && pluginConfigs["com.helloswx.weather"]
+            cities = (pluginConfig && pluginConfig.cities) || []
+        }
+        for (let i = 0; i < (cities || []).length; i++) {
+            const city = cities[i]
+            cityModel.append({"text": city.name || qsTr("未命名城市"), "value": String(city.id)})
+        }
+        const wanted = settings && settings.city_id ? settings.city_id : ""
+        for (let i = 0; i < cityModel.count; i++) {
+            if (cityModel.get(i).value === String(wanted)) {
+                citySelector.currentIndex = i
+                return
+            }
+        }
+        citySelector.currentIndex = 0
+    }
+
+    Connections {
+        target: typeof Configs !== "undefined" ? Configs : null
+        function onConfigChanged() { layout.reloadCities() }
+    }
+
+    SettingCard {
+        Layout.fillWidth: true
+        icon.name: "ic_fluent_location_20_regular"
+        title: qsTr("显示城市")
+        description: qsTr("选择该小组件显示的城市，或跟随默认城市")
+
+        ComboBox {
+            id: citySelector
+            Layout.preferredWidth: 220
+            model: cityModel
+            textRole: "text"
+            onActivated: settings.city_id = cityModel.get(currentIndex).value
+        }
+    }
+
     SettingCard {
         Layout.fillWidth: true
         icon.name: "ic_fluent_temperature_20_regular"
@@ -34,7 +88,7 @@ SettingsLayout {
 
         Switch {
             id: hourlySwitch
-            onCheckedChanged: settings.show_hourly = checked
+            onToggled: settings.show_hourly = checked
             Component.onCompleted: checked = settings.show_hourly === true
         }
     }
@@ -47,7 +101,7 @@ SettingsLayout {
 
         Switch {
             id: carouselSwitch
-            onCheckedChanged: settings.carousel = checked
+            onToggled: settings.carousel = checked
             Component.onCompleted: checked = settings.carousel !== false
         }
     }

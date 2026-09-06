@@ -19,10 +19,22 @@ Widget {
 
     // ------------------------------------------------------------------ 数据
     readonly property var payload: backend ? backend.data : null
-    readonly property bool available: !!payload && payload.available === true
-    readonly property var alertInfo: (payload && payload.alert) || ({ "active": false })
-    readonly property var precipInfo: (payload && payload.precipitation) || ({ "active": false })
-    readonly property var hourly: (payload && payload.hourly) || []
+    readonly property string selectedCityId: settings && settings.city_id ? String(settings.city_id) : ""
+    property int backendRevision: 0
+    readonly property var selectedPayload: {
+        backendRevision
+        return backend && selectedCityId ? backend.dataForCity(selectedCityId) : payload
+    }
+
+    Connections {
+        target: backend
+        function onDataChanged() { root.backendRevision++ }
+        function onConfigChanged() { root.backendRevision++ }
+    }
+    readonly property bool available: !!selectedPayload && selectedPayload.available === true
+    readonly property var alertInfo: (selectedPayload && selectedPayload.alert) || ({ "active": false })
+    readonly property var precipInfo: (selectedPayload && selectedPayload.precipitation) || ({ "active": false })
+    readonly property var hourly: (selectedPayload && selectedPayload.hourly) || []
 
     readonly property string contentMode: settings && settings.content_mode ? settings.content_mode : "current"
     readonly property bool carousel: !settings || settings.carousel !== false
@@ -52,8 +64,8 @@ Widget {
             }
             if (carousel) {
                 // 直接从 payload 读取，避免依赖属性绑定的更新时序
-                var currentAlertInfo = (payload && payload.alert) || ({ "active": false })
-                var currentPrecipInfo = (payload && payload.precipitation) || ({ "active": false })
+                var currentAlertInfo = (selectedPayload && selectedPayload.alert) || ({ "active": false })
+                var currentPrecipInfo = (selectedPayload && selectedPayload.precipitation) || ({ "active": false })
                 if (currentAlertInfo.active === true) list.push("alert")
                 if (currentPrecipInfo.active === true) list.push("precip")
             }
@@ -67,6 +79,7 @@ Widget {
     }
 
     onPayloadChanged: rebuildScreens()
+    onSelectedPayloadChanged: rebuildScreens()
     onSettingsChanged: rebuildScreens()
     Component.onCompleted: rebuildScreens()
 
@@ -93,21 +106,21 @@ Widget {
         switch (screen) {
         case "alert": return alertInfo.glowColor || "#EF4444"
         case "precip": return precipInfo.glowColor || "#0A5AD4"
-        default: return (payload && payload.glowColor) || "#F8AF18"
+        default: return (selectedPayload && selectedPayload.glowColor) || "#F8AF18"
         }
     }
     readonly property real glowAlpha: {
         switch (screen) {
         case "alert": return alertInfo.glowAlpha || 0.15
         case "precip": return precipInfo.glowAlpha || 0.15
-        default: return (payload && payload.glowAlpha) || 0.15
+        default: return (selectedPayload && selectedPayload.glowAlpha) || 0.15
         }
     }
 
     text: {
         switch (screen) {
         case "unavailable":
-            return (payload && payload.city) || qsTr("天气")
+            return (selectedPayload && selectedPayload.city) || qsTr("天气")
         case "hourly":
             return qsTr("未来 3 小时")
         case "alert":
@@ -118,8 +131,8 @@ Widget {
             if (hasSummary && summaryFlip) {
                 return summarySource.title || ""
             }
-            var description = (payload && payload.description) || ""
-            var city = (payload && payload.city) || ""
+            var description = (selectedPayload && selectedPayload.description) || ""
+            var city = (selectedPayload && selectedPayload.city) || ""
             return [description, city].filter(function (part) { return !!part }).join(" ")
         }
     }
@@ -192,14 +205,14 @@ Widget {
 
             WeatherIcon {
                 box: root.iconSize
-                contentScale: (root.payload && root.payload.iconScale) || 1
-                path: (root.payload && root.payload.iconPath) || ""
+                contentScale: (root.selectedPayload && root.selectedPayload.iconScale) || 1
+                path: (root.selectedPayload && root.selectedPayload.iconPath) || ""
             }
 
             Numeral {
                 visible: root.contentMode !== "high_low"
                 px: root.miniMode ? 24 : 36
-                text: root.payload && root.payload.temperature ? root.payload.temperature + "°" : "--°"
+                text: root.selectedPayload && root.selectedPayload.temperature ? root.selectedPayload.temperature + "°" : "--°"
             }
 
             ColumnLayout {
@@ -208,12 +221,12 @@ Widget {
 
                 Numeral {
                     px: root.miniMode ? 14 : 18
-                    text: "↑ " + ((root.payload && root.payload.temperatureHigh) || "--") + "°"
+                    text: "↑ " + ((root.selectedPayload && root.selectedPayload.temperatureHigh) || "--") + "°"
                 }
                 Numeral {
                     px: root.miniMode ? 14 : 18
                     opacity: 0.59
-                    text: "↓ " + ((root.payload && root.payload.temperatureLow) || "--") + "°"
+                    text: "↓ " + ((root.selectedPayload && root.selectedPayload.temperatureLow) || "--") + "°"
                 }
             }
         }
@@ -295,7 +308,7 @@ Widget {
             Numeral {
                 visible: !root.alertInfo.metrics || root.alertInfo.metrics.length === 0
                 px: root.miniMode ? 24 : 36
-                text: root.payload && root.payload.temperature ? root.payload.temperature + "°" : "--°"
+                text: root.selectedPayload && root.selectedPayload.temperature ? root.selectedPayload.temperature + "°" : "--°"
             }
         }
 
@@ -338,8 +351,8 @@ Widget {
 
             WeatherIcon {
                 box: root.iconSize
-                contentScale: (root.payload && root.payload.iconScale) || 1
-                path: (root.payload && root.payload.iconPath) || ""
+                contentScale: (root.selectedPayload && root.selectedPayload.iconScale) || 1
+                path: (root.selectedPayload && root.selectedPayload.iconPath) || ""
             }
 
             Numeral {

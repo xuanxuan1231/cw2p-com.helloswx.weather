@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import RinUI
 import ClassWidgets.Plugins
+import "components"
 
 /*!
     天气插件设置页。
@@ -122,7 +123,7 @@ PluginPage {
         title: (page.info && page.info.located) ? qsTr("暂时取不到天气") : qsTr("尚未选择城市")
         text: (page.info && page.info.located)
               ? (page.info.error || "")
-              : qsTr("不同数据源使用各自的城市编号，切换数据源后需要重新选择城市。")
+              : qsTr("添加一个城市后即可显示天气。")
     }
 
     // ------------------------------------------------------------------ 数据源
@@ -139,7 +140,7 @@ PluginPage {
             Layout.fillWidth: true
             icon.name: "ic_fluent_cloud_20_regular"
             title: qsTr("天气数据源")
-            description: qsTr("切换后需要重新选择城市")
+            description: qsTr("切换时会自动匹配已添加城市")
 
             ComboBox {
                 id: providerBox
@@ -175,40 +176,62 @@ PluginPage {
         }
     }
 
-    // ------------------------------------------------------------------ 位置
+    // ------------------------------------------------------------------ 城市
     ColumnLayout {
         Layout.fillWidth: true
-        spacing: 4
+        spacing: 12
 
-        Text {
-            typography: Typography.BodyStrong
-            text: qsTr("位置")
-        }
-
-        SettingCard {
+        RowLayout {
             id: cityCard
             objectName: "cityCard"
             Layout.fillWidth: true
-            icon.name: (page.info && page.info.locationMode === "coordinates")
-                       ? "ic_fluent_globe_location_20_regular"
-                       : "ic_fluent_location_20_regular"
-            title: qsTr("城市")
-            description: page.locationSummary
 
-            Button {
-                objectName: "locateButton"
-                text: qsTr("自动定位")
-                enabled: page.info && !page.info.locating
-                onClicked: backend.locateAutomatically()
+            Text {
+                typography: Typography.BodyStrong
+                text: qsTr("城市")
             }
 
-            Button {
+            Item { Layout.fillWidth: true }
+
+            ToolButton {
+                objectName: "locateButton"
+                icon.name: "ic_fluent_location_ripple_20_regular"
+                enabled: page.info && !page.info.locating
+                onClicked: backend.locateAutomatically()
+
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("添加当前位置")
+            }
+
+            ToolButton {
                 objectName: "chooseButton"
-                text: qsTr("选择")
-                highlighted: !(page.info && page.info.located)
+                icon.name: "ic_fluent_add_20_regular"
                 onClicked: {
                     cityDialog.info = page.info
                     cityDialog.open()
+                }
+
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("添加城市")
+            }
+        }
+
+        Grid {
+            id: cityGrid
+            Layout.fillWidth: true
+            rowSpacing: 12
+            columnSpacing: 12
+            columns: Math.max(1, Math.floor(width / 222))
+
+            Repeater {
+                model: page.info && page.info.cities ? page.info.cities : []
+
+                delegate: CityClip {
+                    required property var modelData
+                    width: (cityGrid.width - cityGrid.columnSpacing * (cityGrid.columns - 1)) / cityGrid.columns
+                    city: modelData
+                    onMakeDefaultRequested: function(cityId) { backend.setDefaultCity(cityId) }
+                    onRemoveRequested: function(cityId) { backend.removeCity(cityId) }
                 }
             }
         }

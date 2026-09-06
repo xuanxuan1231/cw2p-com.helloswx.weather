@@ -9,6 +9,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "class-widgets-sdk",
+    "cysqlite>=0.3.7",
     "loguru>=0.7.3",
     "pypinyin>=0.55.0",
     "qt-lottie>=0.1.3",

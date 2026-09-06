@@ -1,6 +1,6 @@
 """插件配置模型。"""
 
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ClassWidgets.SDK import ConfigBaseModel
 from pydantic import Field
@@ -27,3 +27,7 @@ class WeatherConfig(ConfigBaseModel):
     #: 是否已经定过位。首次安装才自动按 IP 定位；
     #: 切换数据源会清空城市但保留该标记，以便强制用户手动重选。
     located_once: bool = False
+    #: 规范化城市列表。每项包含 id/name/mode/coordinates/provider_codes。
+    cities: List[Dict[str, Any]] = Field(default_factory=list)
+    #: 默认城市的稳定 id；空值时由后端选择第一项。
+    default_city_id: str = ""
