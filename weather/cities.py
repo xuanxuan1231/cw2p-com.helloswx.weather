@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
-import cysqlite
+import sqlite3
 
 from pypinyin import Style, lazy_pinyin
 
@@ -76,12 +76,10 @@ class CityRepository:
         self.database = database
         self._path = DATA_DIR / database
 
-    def _connect(self) -> Optional[cysqlite.Connection]:
+    def _connect(self) -> Optional[sqlite3.Connection]:
         if not self._path.exists():
             return None
-        # Use cysqlite's native read-only flag so the bundled database cannot
-        # be modified by the plugin.
-        return cysqlite.connect(str(self._path), flags=cysqlite.SQLITE_OPEN_READONLY)
+        return sqlite3.connect(f"file:{self._path}?mode=ro", uri=True)
 
     def provinces(self) -> List[str]:
         connection = self._connect()
