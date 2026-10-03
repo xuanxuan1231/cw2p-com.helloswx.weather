@@ -1,8 +1,8 @@
 {
   "id": "com.helloswx.weather",
   "name": "天气",
-  "version": "0.1.0",
-  "api_version": ">=0.6.0",
+  "version": "0.1.1",
+  "api_version": ">=0.7.0",
   "entry": "main.py",
   "author": "HelloSWX",
   "description": "天气小组件：实时天气、降水预报与天气预警，支持多个天气数据源。",
