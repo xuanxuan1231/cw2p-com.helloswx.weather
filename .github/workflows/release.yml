@@ -14,9 +14,14 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     env:
@@ -27,85 +32,80 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="${INPUT_VERSION#v}"
+          else
+            version="${REF_NAME#refs/tags/v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.0-9A-Za-z]+)?$ ]]; then
+            echo "::error::Invalid release version: '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '>=3.9'
-          cache: 'pip'
-      
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-      
-      - name: Install git-cliff
-        run: |
-          cargo install git-cliff
-      
+          python-version: '3.13'
+          cache: pip
+
       - name: Install dependencies
-        run: |
-          pip install -e .
-      
+        run: pip install -e .
+
       - name: Build plugin packages
+        shell: bash
         run: |
           # Build .cwplugin format
           cw-plugin-pack
           # Build .zip format
           cw-plugin-pack --format zip
-      
+
       - name: Publish to plugin registry
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
+        shell: bash
         env:
           CWPT_TOKEN: ${{ secrets.CWPT_TOKEN }}
-        run: |
-          cw-plugin-publish
-      
-      - name: Get version from tag
-        id: get_version
-        shell: bash
-        run: |
-          if [[ ${{ github.event_name }} == 'workflow_dispatch' ]]; then
-            echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-          fi
-      
+        run: cw-plugin-publish
+
       - name: Create and push version tag
         if: github.event_name == 'workflow_dispatch'
-        env:
-          TAG: v${{ env.VERSION }}
         shell: bash
+        env:
+          TAG: v${{ steps.version.outputs.version }}
         run: |
-          if git rev-parse -q --verify "refs/tags/${TAG}" > /dev/null; then
-            echo "Tag ${TAG} already exists."
-            exit 1
-          fi
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag --annotate "${TAG}" --message "Release ${TAG}"
-          git push origin "${TAG}"
+          git tag --annotate "$TAG" --message "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@git-cliff
 
       - name: Generate changelog with git-cliff
-        id: generate_changelog
         shell: bash
         run: |
-          git-cliff --config .git-cliff.toml --tag v${{ env.VERSION }} > CHANGELOG.md
-          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
-          cat CHANGELOG.md >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-      
+          git-cliff --config .git-cliff.toml --tag "v${{ steps.version.outputs.version }}" --output CHANGELOG.md
+
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION }}
-          name: Release v${{ env.VERSION }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
           files: |
             *.cwplugin
             *.zip
-          body: ${{ env.CHANGELOG }}
+          body_path: CHANGELOG.md
           generate_release_notes: false
