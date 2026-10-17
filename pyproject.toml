@@ -6,7 +6,7 @@ authors = [
     {name = "HelloSWX"},
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "class-widgets-sdk",
     "loguru>=0.7.3",
@@ -21,3 +21,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["qml*", "assets*", "weather*", "data*"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.1",
+]

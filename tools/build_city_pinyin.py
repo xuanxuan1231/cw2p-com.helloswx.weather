@@ -41,7 +41,8 @@ def main() -> None:
         finally:
             connection.close()
         tables[database.name] = {
-            name: " ".join(converter.lazy_pinyin(name.replace(" ", ""))) for name in names
+            name: " ".join(converter.lazy_pinyin(name.replace(" ", "")))
+            for name in names
         }
         print(f"{database.name}: {len(names)} 个名称")
 
@@ -49,7 +50,9 @@ def main() -> None:
         json.dumps(tables, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
-    print(f"写入 {OUTPUT.relative_to(PLUGIN_ROOT)}（{OUTPUT.stat().st_size / 1024:.0f} KB）")
+    print(
+        f"写入 {OUTPUT.relative_to(PLUGIN_ROOT)}（{OUTPUT.stat().st_size / 1024:.0f} KB）"
+    )
 
 
 if __name__ == "__main__":

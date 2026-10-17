@@ -15,15 +15,25 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 # RinUI 必须在 QGuiApplication 之前导入（它要设置 HiDPI 缩放策略）
-sys.path.insert(0, str(Path.home() / "Class-Widgets-2" / ".venv" / "lib" / "python3.13" / "site-packages"))
-import RinUI  # noqa: E402
-from RinUI.core import ThemeManager  # noqa: E402
+sys.path.insert(
+    0,
+    str(
+        Path.home()
+        / "Class-Widgets-2"
+        / ".venv"
+        / "lib"
+        / "python3.13"
+        / "site-packages"
+    ),
+)
+from pydantic import BaseModel
+from PySide6.QtCore import QEventLoop, QObject, QTimer, Slot
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
+from RinUI.core import ThemeManager
+from shiboken6 import isValid
 
-from PySide6.QtCore import QEventLoop, QObject, QTimer, Slot  # noqa: E402
-from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
-from shiboken6 import isValid  # noqa: E402
+import RinUI
 
 # ---------------------------------------------------------------- 打桩 SDK
 sdk = types.ModuleType("ClassWidgets.SDK")
@@ -81,7 +91,7 @@ class _StubAPI:
         self.ui = self._Ui()
 
 
-import main  # noqa: E402
+import main
 
 
 class Bridge(QObject):
@@ -118,22 +128,24 @@ bridge = Bridge(plugin)
 engine.rootContext().setContextProperty("ThemeManager", theme_manager)
 engine.rootContext().setContextProperty("PluginBackendBridge", bridge)
 
-WRAPPER = """
+SETTINGS_URI = (ROOT / "qml" / "SettingsPage.qml").as_uri()
+
+WRAPPER = f"""
 import QtQuick
 import QtQuick.Controls
 import RinUI
 
-ApplicationWindow {
+ApplicationWindow {{
     width: 900; height: 700; visible: true
     property alias page: loader.item
-    Loader {
+    Loader {{
         id: loader
         anchors.fill: parent
-        source: "%s"
+        source: "{SETTINGS_URI}"
         onLoaded: item.pluginId = "cw2p-com.helloswx.weather"
-    }
-}
-""" % (ROOT / "qml" / "SettingsPage.qml").as_uri()
+    }}
+}}
+"""
 
 engine.loadData(WRAPPER.encode())
 if not engine.rootObjects():
@@ -164,8 +176,11 @@ def _prop_names(obj):
 
 def tooltips_of(item):
     """挂在 item 下面的 ToolTip（ToolTip 是弹窗，不在视觉树上，只能这么找）。"""
-    return [obj for obj in item.findChildren(QObject)
-            if obj.metaObject().className().startswith("ToolTip") and isValid(obj)]
+    return [
+        obj
+        for obj in item.findChildren(QObject)
+        if obj.metaObject().className().startswith("ToolTip") and isValid(obj)
+    ]
 
 
 def city_clips():
@@ -178,8 +193,11 @@ def city_clips():
     for obj in page.findChildren(QObject):
         if obj.metaObject().className() != "QQuickGrid":
             continue
-        clips.extend(child for child in obj.childItems()
-                     if "CityClip" in child.metaObject().className() and isValid(child))
+        clips.extend(
+            child
+            for child in obj.childItems()
+            if "CityClip" in child.metaObject().className() and isValid(child)
+        )
     return clips
 
 
@@ -211,17 +229,27 @@ def run_checks():
         model = provider_box.property("model")
         count = model.property("count") if model else 0
         check("数据源列表非空", count == 5, f"count={count}")
-        check("当前项与配置一致", provider_box.property("currentIndex") == 0,
-              f"currentIndex={provider_box.property('currentIndex')}")
-        check("下拉显示的是名称而非空白",
-              bool(provider_box.property("displayText")),
-              f"displayText={provider_box.property('displayText')!r}")
+        provider_ids = [item["id"] for item in plugin.providers()]
+        expected_index = provider_ids.index(plugin.config.provider)
+        check(
+            "当前项与配置一致",
+            provider_box.property("currentIndex") == expected_index,
+            f"currentIndex={provider_box.property('currentIndex')}"
+            f"（{plugin.config.provider} 应为 {expected_index}）",
+        )
+        check(
+            "下拉显示的是名称而非空白",
+            bool(provider_box.property("displayText")),
+            f"displayText={provider_box.property('displayText')!r}",
+        )
 
-    for name, label in (("apiKeyCard", "API Key 卡片"),
-                        ("cityCard", "城市卡片"),
-                        ("refreshBox", "刷新间隔"),
-                        ("locateButton", "自动定位按钮"),
-                        ("cityDialog", "城市对话框")):
+    for name, label in (
+        ("apiKeyCard", "API Key 卡片"),
+        ("cityCard", "城市卡片"),
+        ("refreshBox", "刷新间隔"),
+        ("locateButton", "自动定位按钮"),
+        ("cityDialog", "城市对话框"),
+    ):
         check(f"{label}存在", by_name(name) is not None)
 
     print("\n=== Tooltip 用的是 RinUI 的 ===")
@@ -229,44 +257,76 @@ def run_checks():
     # 但拿到的是 Qt 自带的样式。只有 RinUI 的 ToolTip 才有下面这几个属性。
     tips = tooltips_of(by_name("locateButton")) + tooltips_of(by_name("chooseButton"))
     check("两个按钮各有 ToolTip", len(tips) == 2, f"{len(tips)} 个")
-    check("都是 RinUI 的 ToolTip（带 backgroundColor）",
-          bool(tips) and all("backgroundColor" in _prop_names(t) for t in tips))
-    check("RinUI 的 ToolTip 不会自动消失（timeout=-1）",
-          bool(tips) and all(t.property("timeout") == -1 for t in tips))
+    check(
+        "都是 RinUI 的 ToolTip（带 backgroundColor）",
+        bool(tips) and all("backgroundColor" in _prop_names(t) for t in tips),
+    )
+    check(
+        "RinUI 的 ToolTip 不会自动消失（timeout=-1）",
+        bool(tips) and all(t.property("timeout") == -1 for t in tips),
+    )
     tip_texts = sorted(t.property("text") for t in tips)
-    check("提示文案正确", tip_texts == sorted(["添加当前位置", "添加城市"]), str(tip_texts))
+    check(
+        "提示文案正确",
+        tip_texts == sorted(["添加当前位置", "添加城市"]),
+        str(tip_texts),
+    )
 
     print("\n=== 后端槽函数 ===")
     check("providers() 返回 5 个", len(plugin.providers()) == 5)
     info = plugin.settings()
-    check("settings() 含关键字段",
-          all(k in info for k in ("provider", "cityName", "requiresKey", "hasCityList", "locating")))
+    check(
+        "settings() 含关键字段",
+        all(
+            k in info
+            for k in ("provider", "cityName", "requiresKey", "hasCityList", "locating")
+        ),
+    )
 
     provinces = []
-    plugin.provincesLoaded.connect(lambda pid, items: provinces.clear() or provinces.extend(items))
+    plugin.provincesLoaded.connect(
+        lambda pid, items: provinces.clear() or provinces.extend(items)
+    )
     started = time.perf_counter()
-    immediate = plugin.provinces()
-    check("provinces() 不阻塞 GUI 线程", time.perf_counter() - started < 0.01,
-          f"{(time.perf_counter() - started) * 1000:.2f} ms")
-    check("provinces() 结果异步回来", wait_until(lambda: len(provinces) == 34),
-          f"{len(provinces)} 个")
+    plugin.provinces()
+    check(
+        "provinces() 不阻塞 GUI 线程",
+        time.perf_counter() - started < 0.01,
+        f"{(time.perf_counter() - started) * 1000:.2f} ms",
+    )
+    check(
+        "provinces() 结果异步回来",
+        wait_until(lambda: len(provinces) == 34),
+        f"{len(provinces)} 个",
+    )
 
     cities = []
     plugin.cityListLoaded.connect(
-        lambda pid, index, items: cities.clear() or cities.extend(items) if index == 0 else None)
+        lambda pid, index, items: (
+            cities.clear() or cities.extend(items) if index == 0 else None
+        )
+    )
     plugin.citiesIn(0)
-    check("citiesIn(0) 结果异步回来", wait_until(lambda: len(cities) > 0), str(cities[:1]))
+    check(
+        "citiesIn(0) 结果异步回来", wait_until(lambda: len(cities) > 0), str(cities[:1])
+    )
 
     found = {}
-    plugin.citiesFound.connect(lambda term, index, items: found.update({"term": term, "res": items}))
+    plugin.citiesFound.connect(
+        lambda term, index, items: found.update({"term": term, "res": items})
+    )
     plugin.searchCities("海口", -1)
-    check("searchCities 通过信号回传",
-          wait_until(lambda: bool(found.get("res"))),
-          str(found.get("res", [])[:1]))
+    check(
+        "searchCities 通过信号回传",
+        wait_until(lambda: bool(found.get("res"))),
+        str(found.get("res", [])[:1]),
+    )
     plugin.searchCities("haikou", -1)
-    check("searchCities 支持拼音",
-          wait_until(lambda: len(found.get("res") or []) > 0),
-          str([item["name"] for item in (found.get("res") or [])[:3]]))
+    check(
+        "searchCities 支持拼音",
+        wait_until(lambda: len(found.get("res") or []) > 0),
+        str([item["name"] for item in (found.get("res") or [])[:3]]),
+    )
 
     print("\n=== 切换数据源后城市重新映射 ===")
     plugin.setCity("101310101", "海口", 20.03, 110.32)
@@ -274,31 +334,48 @@ def run_checks():
     started = time.perf_counter()
     plugin.setProvider("amap_weather")
     elapsed = (time.perf_counter() - started) * 1000
-    check("setProvider 不卡 GUI 线程（< 16.7ms 一帧）", elapsed < 16.7, f"{elapsed:.1f} ms")
+    check(
+        "setProvider 不卡 GUI 线程（< 16.7ms 一帧）",
+        elapsed < 16.7,
+        f"{elapsed:.1f} ms",
+    )
     after = plugin.settings()
-    check("切换后城市保留并换成新数据源的编号",
-          after["located"] and after["cities"][0]["providerCode"] == "460100",
-          str(after["cities"][0].get("providerCode")))
+    check(
+        "切换后城市保留并换成新数据源的编号",
+        after["located"] and after["cities"][0]["providerCode"] == "460100",
+        str(after["cities"][0].get("providerCode")),
+    )
     provinces.clear()
     cities.clear()
     plugin.provinces()
     plugin.citiesIn(0)
     wait_until(lambda: len(provinces) == 34 and len(cities) > 0)
-    check("切换后城市库跟着换", len(provinces) == 34 and cities and cities[0]["name"] == "北京",
-          cities[0]["name"] if cities else "")
+    check(
+        "切换后城市库跟着换",
+        len(provinces) == 34 and cities and cities[0]["name"] == "北京",
+        cities[0]["name"] if cities else "",
+    )
     check("切换到需要 Key 的源会标记 requiresKey", after["requiresKey"])
 
     print("\n=== 城市卡片的 Tooltip ===")
     # 卡片要等城市列表回来才实例化，所以这里才查得到每张卡片上的两个提示
     clips = city_clips()
     card_tips = [tip for clip in clips for tip in tooltips_of(clip)]
-    check("每张卡片都有 Tooltip", clips and len(card_tips) == 2 * len(clips),
-          f"{len(clips)} 张卡片 / {len(card_tips)} 个 Tooltip")
-    check("卡片上的 Tooltip 也是 RinUI 的",
-          bool(card_tips) and all("backgroundColor" in _prop_names(t) for t in card_tips))
+    check(
+        "每张卡片都有 Tooltip",
+        clips and len(card_tips) == 2 * len(clips),
+        f"{len(clips)} 张卡片 / {len(card_tips)} 个 Tooltip",
+    )
+    check(
+        "卡片上的 Tooltip 也是 RinUI 的",
+        bool(card_tips) and all("backgroundColor" in _prop_names(t) for t in card_tips),
+    )
     card_texts = [t.property("text") for t in card_tips]
-    check("卡片提示是坐标/数据源两行", any("\n" in (t or "") for t in card_texts),
-          str(next((t for t in card_texts if "\n" in (t or "")), "")))
+    check(
+        "卡片提示是坐标/数据源两行",
+        any("\n" in (t or "") for t in card_texts),
+        str(next((t for t in card_texts if "\n" in (t or "")), "")),
+    )
     check("卡片操作按钮的提示存在", "城市操作" in card_texts)
 
     print("\n=== 城市对话框 ===")
@@ -321,15 +398,22 @@ def dialog_cities():
 
 def dialog_open_check():
     dialog = by_name("cityDialog")
-    check("对话框异步列出了热门城市", wait_until(lambda: dialog_cities() > 0, 5000),
-          f"{dialog_cities()} 个")
-    check("坐标型数据源才显示经纬度入口", dialog.property("coordinatesSupported") is False)
+    check(
+        "对话框异步列出了热门城市",
+        wait_until(lambda: dialog_cities() > 0, 5000),
+        f"{dialog_cities()} 个",
+    )
+    check(
+        "坐标型数据源才显示经纬度入口", dialog.property("coordinatesSupported") is False
+    )
 
     # 切回需要 Key 的数据源（支持坐标），确认经纬度入口会亮出来
     plugin.setProvider("open_meteo")
     dialog.setProperty("info", plugin.settings())
-    check("坐标型数据源显示经纬度入口",
-          wait_until(lambda: dialog.property("coordinatesSupported") is True))
+    check(
+        "坐标型数据源显示经纬度入口",
+        wait_until(lambda: dialog.property("coordinatesSupported") is True),
+    )
 
     QTimer.singleShot(200, finish)
 
@@ -338,15 +422,21 @@ def finish():
     # 走一遍卸载路径：抓取线程必须自己收尾，否则退出时会 abort
     started = time.perf_counter()
     plugin.on_unload()
-    print(f"\n=== 卸载 ===\n       （on_unload 用时 {(time.perf_counter() - started) * 1000:.1f} ms）")
+    print(
+        f"\n=== 卸载 ===\n       （on_unload 用时 {(time.perf_counter() - started) * 1000:.1f} ms）"
+    )
 
     real_problems = [p for p in problems if "MenuItem.qml" not in p]
     print(f"\n=== QML 告警（{len(real_problems)} 条）===")
     for problem in real_problems[:10]:
         print("   ", problem)
     # CW2 的 PluginPage 自己会把 ScrollBar 挂到非 Flickable 上，这不是插件的锅
-    check("没有来自本插件 QML 的报错",
-          not any("helloswx" in p for p in real_problems if "ScrollBar attached" not in p))
+    check(
+        "没有来自本插件 QML 的报错",
+        not any(
+            "helloswx" in p for p in real_problems if "ScrollBar attached" not in p
+        ),
+    )
 
     failed = results.count(False)
     print(f"\n{'全部通过' if not failed else str(failed) + ' 项失败'}")

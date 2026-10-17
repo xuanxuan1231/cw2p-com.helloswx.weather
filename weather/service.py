@@ -1,6 +1,6 @@
 """抓取编排：把提供商返回的 :class:`Snapshot` 整理成 QML 直接可用的数据。"""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from PySide6.QtCore import QThread, Signal
@@ -9,7 +9,13 @@ from . import codes
 from .cities import CityRepository, coordinates_for_city
 from .config import WeatherConfig
 from .models import CITY, COORDINATES, Location, Snapshot
-from .providers import ProviderError, WeatherProvider, create, get_provider_class, provider_classes
+from .providers import (
+    ProviderError,
+    WeatherProvider,
+    create,
+    get_provider_class,
+    provider_classes,
+)
 
 #: 分钟级降水最多提前多久提示
 MINUTE_HORIZON = 120
@@ -20,10 +26,14 @@ _SEVERITY_RANK = {"red": 3, "orange": 2, "yellow": 1, "blue": 0}
 
 
 def location_from_config(config: WeatherConfig) -> Location:
-    if not (config.city_code or config.latitude is not None or config.longitude is not None):
+    if not (
+        config.city_code or config.latitude is not None or config.longitude is not None
+    ):
         cities = getattr(config, "cities", None) or []
         default_id = getattr(config, "default_city_id", "")
-        city = next((item for item in cities if str(item.get("id")) == str(default_id)), None) or (cities[0] if cities else None)
+        city = next(
+            (item for item in cities if str(item.get("id")) == str(default_id)), None
+        ) or (cities[0] if cities else None)
         if city:
             return location_from_city(city, config.provider)
     code = config.city_code or ""
@@ -36,9 +46,16 @@ def location_from_config(config: WeatherConfig) -> Location:
         repository = repository_for(config.provider)
         if repository is not None:
             row = repository.city_for_code(code)
-            name, short_name = str(row.get("name") or ""), str(row.get("short_name") or "")
+            name, short_name = (
+                str(row.get("name") or ""),
+                str(row.get("short_name") or ""),
+            )
     # 坐标模式下，优先使用保存的城市名称
-    elif mode == COORDINATES and config.latitude is not None and config.longitude is not None:
+    elif (
+        mode == COORDINATES
+        and config.latitude is not None
+        and config.longitude is not None
+    ):
         name = config.city_name or f"{config.latitude:.2f}, {config.longitude:.2f}"
 
     return Location(
@@ -51,7 +68,7 @@ def location_from_config(config: WeatherConfig) -> Location:
     )
 
 
-def normalize_city(city: Dict[str, Any], provider_id: str = "") -> Dict[str, Any]:
+def normalize_city(city: dict[str, Any], provider_id: str = "") -> dict[str, Any]:
     """Return a stable, JSON-friendly city record used across providers."""
     record = dict(city or {})
     record.setdefault("id", str(uuid4()))
@@ -59,7 +76,9 @@ def normalize_city(city: Dict[str, Any], provider_id: str = "") -> Dict[str, Any
     record["name"] = str(record.get("name") or "")
     # 短名称（小组件上显示的）缺了就退回长名称
     record["short_name"] = str(record.get("short_name") or "") or record["name"]
-    record["mode"] = str(record.get("mode") or (COORDINATES if not record.get("code") else CITY))
+    record["mode"] = str(
+        record.get("mode") or (COORDINATES if not record.get("code") else CITY)
+    )
     if record.get("latitude") is not None:
         record["latitude"] = float(record["latitude"])
     if record.get("longitude") is not None:
@@ -71,29 +90,35 @@ def normalize_city(city: Dict[str, Any], provider_id: str = "") -> Dict[str, Any
     codes = dict(record.get("provider_codes") or {})
     if provider_id and record.get("code"):
         codes.setdefault(provider_id, str(record["code"]))
-    record["provider_codes"] = {str(key): str(value) for key, value in codes.items() if value not in (None, "")}
+    record["provider_codes"] = {
+        str(key): str(value) for key, value in codes.items() if value not in (None, "")
+    }
     record.pop("code", None)
     return record
 
 
-def refresh_city_names(cities: List[Dict[str, Any]], provider_id: str = "") -> List[Dict[str, Any]]:
+def refresh_city_names(
+    cities: list[dict[str, Any]], provider_id: str = ""
+) -> list[dict[str, Any]]:
     """用城市库里的名字覆盖城市记录的名称（升级老配置时用）。
 
     老配置里的名字是上一版的格式（「北京 海淀」「北京市」「海淀区」，或者在线搜索来的
     名字），城市库改成长 / 短两套名字之后得按编号重新对一次。对不上的城市原样保留。
     """
-    repositories: Dict[str, CityRepository] = {}
+    repositories: dict[str, CityRepository] = {}
     for provider_class in provider_classes():
         if provider_class.database:
             repositories[provider_class.id] = CityRepository(provider_class.database)
 
-    refreshed: List[Dict[str, Any]] = []
+    refreshed: list[dict[str, Any]] = []
     for city in cities:
         record = dict(city)
         codes = dict(record.get("provider_codes") or {})
         # 先按当前数据源的编号找，找不到再退到其它数据源
         for candidate in ([provider_id] if provider_id in codes else []) + list(codes):
-            row = repositories.get(candidate) and repositories[candidate].city_for_code(codes[candidate])
+            row = repositories.get(candidate) and repositories[candidate].city_for_code(
+                codes[candidate]
+            )
             if row:
                 record["name"] = str(row["name"])
                 record["short_name"] = str(row["short_name"])
@@ -102,7 +127,7 @@ def refresh_city_names(cities: List[Dict[str, Any]], provider_id: str = "") -> L
     return refreshed
 
 
-def migrate_cities(config: WeatherConfig) -> List[Dict[str, Any]]:
+def migrate_cities(config: WeatherConfig) -> list[dict[str, Any]]:
     """Migrate the legacy single-location fields into the city list once.
 
     只在内容真的变了的时候写回 ``config``。CW2 的配置模型每写一个字段都会触发一次
@@ -111,34 +136,57 @@ def migrate_cities(config: WeatherConfig) -> List[Dict[str, Any]]:
     这个函数在 ``settings()`` 这类只读路径上也会被调用，所以必须无写入。
     """
     cities = [normalize_city(item, config.provider) for item in (config.cities or [])]
-    if not cities and (config.city_code or config.city_name or config.latitude is not None):
+    if not cities and (
+        config.city_code or config.city_name or config.latitude is not None
+    ):
         legacy_name, legacy_short = config.city_name, ""
         repository = repository_for(config.provider)
-        row = repository.city_for_code(config.city_code) if repository and config.city_code else {}
+        row = (
+            repository.city_for_code(config.city_code)
+            if repository and config.city_code
+            else {}
+        )
         if row:
             legacy_name = str(row["name"])
             legacy_short = str(row["short_name"])
-        cities = [normalize_city({
-            "name": legacy_name,
-            "short_name": legacy_short,
-            "code": config.city_code,
-            "mode": config.location_mode,
-            "latitude": config.latitude,
-            "longitude": config.longitude,
-        }, config.provider)]
+        cities = [
+            normalize_city(
+                {
+                    "name": legacy_name,
+                    "short_name": legacy_short,
+                    "code": config.city_code,
+                    "mode": config.location_mode,
+                    "latitude": config.latitude,
+                    "longitude": config.longitude,
+                },
+                config.provider,
+            )
+        ]
     if cities != (config.cities or []):
         config.cities = cities
-    if cities and (not config.default_city_id or config.default_city_id not in {item["id"] for item in cities}):
+    if cities and (
+        not config.default_city_id
+        or config.default_city_id not in {item["id"] for item in cities}
+    ):
         config.default_city_id = cities[0]["id"]
     return cities
 
 
-def city_for_provider(city: Dict[str, Any], provider_id: str) -> Optional[Dict[str, Any]]:
+def city_for_provider(
+    city: dict[str, Any], provider_id: str
+) -> dict[str, Any] | None:
     """Resolve a normalized city to the current provider's location fields."""
     record = normalize_city(city)
     provider_class = get_provider_class(provider_id)
-    has_coordinates = record.get("latitude") is not None and record.get("longitude") is not None
-    if record["mode"] == COORDINATES and provider_class and provider_class.supports_coordinates and has_coordinates:
+    has_coordinates = (
+        record.get("latitude") is not None and record.get("longitude") is not None
+    )
+    if (
+        record["mode"] == COORDINATES
+        and provider_class
+        and provider_class.supports_coordinates
+        and has_coordinates
+    ):
         return record
     code = (record.get("provider_codes") or {}).get(provider_id, "")
     if not code and provider_id:
@@ -160,11 +208,13 @@ def city_for_provider(city: Dict[str, Any], provider_id: str) -> Optional[Dict[s
     return record
 
 
-def location_from_city(city: Dict[str, Any], provider_id: str) -> Location:
+def location_from_city(city: dict[str, Any], provider_id: str) -> Location:
     resolved = city_for_provider(city, provider_id)
     if not resolved:
         name = str((city or {}).get("name") or "")
-        return Location(name=name, short_name=str((city or {}).get("short_name") or "") or name)
+        return Location(
+            name=name, short_name=str((city or {}).get("short_name") or "") or name
+        )
     return Location(
         mode=str(resolved.get("mode") or CITY),
         code=str(resolved.get("code") or ""),
@@ -175,7 +225,7 @@ def location_from_city(city: Dict[str, Any], provider_id: str) -> Location:
     )
 
 
-def sync_legacy_location(config: WeatherConfig, city: Optional[Dict[str, Any]]) -> None:
+def sync_legacy_location(config: WeatherConfig, city: dict[str, Any] | None) -> None:
     """Keep legacy fields usable for older plugin/widget code and upgrades.
 
     同样只写真正变化的字段——见 :func:`migrate_cities` 里关于 CW2 配置同步代价的说明。
@@ -200,12 +250,14 @@ def sync_legacy_location(config: WeatherConfig, city: Optional[Dict[str, Any]]) 
     )
     if legacy == current:
         return
-    for field, value in zip(("location_mode", "city_code", "city_name", "latitude", "longitude"), legacy):
+    for field, value in zip(
+        ("location_mode", "city_code", "city_name", "latitude", "longitude"), legacy
+    ):
         if getattr(config, field) != value:
             setattr(config, field, value)
 
 
-def _format_temperature(value: Optional[float]) -> str:
+def _format_temperature(value: float | None) -> str:
     if value is None:
         return ""
     return f"{round(value):d}"
@@ -219,14 +271,14 @@ def _description_of(snapshot: Snapshot) -> str:
     return codes.canonical_description(snapshot.canonical) or description
 
 
-def _precipitation_screen(snapshot: Snapshot) -> Optional[Dict[str, Any]]:
+def _precipitation_screen(snapshot: Snapshot) -> dict[str, Any] | None:
     """计算「降水预报」屏幕。"""
     raining_now = codes.is_precipitation(snapshot.canonical)
 
-    change_in: Optional[int] = None
+    change_in: int | None = None
     unit = ""
     upcoming = snapshot.canonical
-    change_in_minutes: Optional[int] = None  # 保存实际分钟数用于判断
+    change_in_minutes: int | None = None  # 保存实际分钟数用于判断
 
     series = snapshot.minutely
     if series and series.values:
@@ -270,7 +322,7 @@ def _precipitation_screen(snapshot: Snapshot) -> Optional[Dict[str, Any]]:
 
     starting = not raining_now
     snowing = upcoming in (13, 14, 15, 16, 17, 26, 27, 28, 34)
-    
+
     # 生成标题和描述
     if starting:
         # 即将开始降水
@@ -280,18 +332,21 @@ def _precipitation_screen(snapshot: Snapshot) -> Optional[Dict[str, Any]]:
         if change_in_minutes and change_in_minutes <= 60:
             # 距离结束1小时内，显示"X分钟内雨渐停"
             title = "降水预报"
-            change_in, unit = change_in_minutes, "分钟内雨渐停" if not snowing else "分钟内雪渐停"
+            change_in, unit = (
+                change_in_minutes,
+                "分钟内雨渐停" if not snowing else "分钟内雪渐停",
+            )
         else:
             # 距离结束1小时外，不显示
             return None
-    
+
     slug = "snow" if snowing else "rain"
 
     colour, alpha = codes.GLOW_RAIN
     screen = {
         "active": True,
         "title": title,
-        "value": str(change_in) if isinstance(change_in, int) else str(change_in),
+        "value": str(change_in),
         "unit": unit,
         "badgeIconPath": codes.icon_path(slug),
         "badgeIconScale": codes.icon_scale(slug),
@@ -302,15 +357,14 @@ def _precipitation_screen(snapshot: Snapshot) -> Optional[Dict[str, Any]]:
     return screen
 
 
-def _alert_screen(snapshot: Snapshot) -> Optional[Dict[str, Any]]:
+def _alert_screen(snapshot: Snapshot) -> dict[str, Any] | None:
     if not snapshot.alerts:
         return None
 
-    alert = sorted(
+    alert = max(
         snapshot.alerts,
         key=lambda item: _SEVERITY_RANK.get(item.get("severity", "yellow"), 1),
-        reverse=True,
-    )[0]
+    )
 
     severity = alert.get("severity", "yellow")
     colour, alpha = codes.SEVERITY_GLOW.get(severity, codes.SEVERITY_GLOW["yellow"])
@@ -331,11 +385,11 @@ def _alert_screen(snapshot: Snapshot) -> Optional[Dict[str, Any]]:
 
 
 def build_payload(
-    snapshot: Optional[Snapshot],
+    snapshot: Snapshot | None,
     location: Location,
-    provider: Optional[WeatherProvider],
+    provider: WeatherProvider | None,
     error: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """构造 QML 使用的数据字典。"""
     if snapshot is None:
         colour, alpha = codes.GLOW_UNAVAILABLE
@@ -355,9 +409,11 @@ def build_payload(
         return payload
 
     colour, alpha = codes.glow_for(snapshot.canonical, snapshot.night)
-    hourly: List[Dict[str, object]] = []
+    hourly: list[dict[str, object]] = []
     for entry in snapshot.hourly[:3]:
-        item: Dict[str, object] = {"temperature": _format_temperature(entry.temperature)}
+        item: dict[str, object] = {
+            "temperature": _format_temperature(entry.temperature)
+        }
         item.update(codes.icon_visual(codes.icon_slug(entry.canonical, entry.night)))
         hourly.append(item)
 
@@ -376,7 +432,9 @@ def build_payload(
         "precipitation": _precipitation_screen(snapshot) or {"active": False},
         "alert": _alert_screen(snapshot) or {"active": False},
     }
-    payload.update(codes.icon_visual(codes.icon_slug(snapshot.canonical, snapshot.night)))
+    payload.update(
+        codes.icon_visual(codes.icon_slug(snapshot.canonical, snapshot.night))
+    )
     return payload
 
 
@@ -398,13 +456,15 @@ class FetchWorker(QThread):
             payload = build_payload(snapshot, self._location, self._provider)
         except ProviderError as error:
             payload = build_payload(None, self._location, self._provider, str(error))
-        except Exception as error:  # 提供商解析异常不应让线程崩溃
-            payload = build_payload(None, self._location, self._provider, f"解析失败：{error}")
+        except Exception as error:  # noqa: BLE001 - 提供商解析异常不应让线程崩溃
+            payload = build_payload(
+                None, self._location, self._provider, f"解析失败：{error}"
+            )
         if not self.isInterruptionRequested():
             self.finishedWith.emit(payload)
 
 
-def describe_providers() -> List[Dict[str, Any]]:
+def describe_providers() -> list[dict[str, Any]]:
     """给设置页用的提供商清单。"""
     return [
         {
@@ -420,18 +480,22 @@ def describe_providers() -> List[Dict[str, Any]]:
     ]
 
 
-def repository_for(provider_id: str) -> Optional[CityRepository]:
+def repository_for(provider_id: str) -> CityRepository | None:
     provider_class = get_provider_class(provider_id)
     if provider_class is None or not provider_class.database:
         return None
     return CityRepository(provider_class.database)
 
 
-def make_provider(config: WeatherConfig) -> Optional[WeatherProvider]:
-    return create(config.provider, api_key=(config.api_keys or {}).get(config.provider, ""))
+def make_provider(config: WeatherConfig) -> WeatherProvider | None:
+    return create(
+        config.provider, api_key=(config.api_keys or {}).get(config.provider, "")
+    )
 
 
-def resolve_auto_location(provider_id: str, fix: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def resolve_auto_location(
+    provider_id: str, fix: dict[str, Any]
+) -> dict[str, Any] | None:
     """把 IP 粗定位结果落到当前数据源能用的位置上。
 
     有内置城市库的数据源要按城市名查出自己的编号；

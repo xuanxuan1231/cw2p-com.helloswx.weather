@@ -23,7 +23,7 @@
 
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Tuple
+from typing import NamedTuple
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PLUGIN_ROOT / "data"
@@ -32,8 +32,19 @@ DATA_DIR = PLUGIN_ROOT / "data"
 #: 注意没有「州」：通州、徐州、杭州这种地名会被砍掉尾巴，自治州由下面的民族名规则处理；
 #: 也没有「旗」：「达茂联合旗」「陈旗」省掉旗之后就不是地名了。
 SUFFIXES = (
-    "特别行政区", "自治区", "自治县", "自治州", "自治旗", "联合旗",
-    "地区", "林区", "省", "市", "县", "区", "盟",
+    "特别行政区",
+    "自治区",
+    "自治县",
+    "自治州",
+    "自治旗",
+    "联合旗",
+    "地区",
+    "林区",
+    "省",
+    "市",
+    "县",
+    "区",
+    "盟",
 )
 
 #: 复合后缀：省掉最后的「区」会砍掉地名的一部分（浦东新区 -> 浦东新），整个留着。
@@ -43,12 +54,59 @@ COMPOUND_SUFFIXES = ("新区", "矿区", "郊区", "景区")
 #: 民族自治单位形如「<地名><若干民族名>自治州 / 县 / 旗」，长名称取民族名之前的那截。
 #: 「族」放在最后兜底（「鄂温克族自治旗」里前面的民族名就顶格了）。
 ETHNIC_GROUPS = (
-    "乌孜别克", "柯尔克孜", "塔吉克", "俄罗斯", "鄂伦春", "达斡尔", "鄂温克",
-    "维吾尔", "哈萨克", "土家", "布依", "朝鲜", "哈尼", "傈僳", "景颇", "拉祜",
-    "德昂", "基诺", "毛南", "独龙", "纳西", "赫哲", "塔塔尔", "门巴", "珞巴",
-    "仡佬", "撒拉", "东乡", "保安", "裕固", "锡伯", "蒙古", "回", "藏", "满",
-    "苗", "彝", "壮", "瑶", "羌", "白", "傣", "佤", "京", "黎", "畲", "水",
-    "侗", "怒", "阿昌", "普米", "布朗", "族",
+    "乌孜别克",
+    "柯尔克孜",
+    "塔吉克",
+    "俄罗斯",
+    "鄂伦春",
+    "达斡尔",
+    "鄂温克",
+    "维吾尔",
+    "哈萨克",
+    "土家",
+    "布依",
+    "朝鲜",
+    "哈尼",
+    "傈僳",
+    "景颇",
+    "拉祜",
+    "德昂",
+    "基诺",
+    "毛南",
+    "独龙",
+    "纳西",
+    "赫哲",
+    "塔塔尔",
+    "门巴",
+    "珞巴",
+    "仡佬",
+    "撒拉",
+    "东乡",
+    "保安",
+    "裕固",
+    "锡伯",
+    "蒙古",
+    "回",
+    "藏",
+    "满",
+    "苗",
+    "彝",
+    "壮",
+    "瑶",
+    "羌",
+    "白",
+    "傣",
+    "佤",
+    "京",
+    "黎",
+    "畲",
+    "水",
+    "侗",
+    "怒",
+    "阿昌",
+    "普米",
+    "布朗",
+    "族",
 )
 
 #: 长的民族名要先试，否则「达斡尔族」会被单字民族名截断
@@ -59,7 +117,22 @@ DIRECT_GROUP_OFFSET = 100000
 
 #: 行政后缀。高德库的名字本来就带这些，小米库的名字是光秃秃的（``武汉`` / ``海淀``），
 #: 短名称按规范补上：``武汉`` -> ``武汉市``、``海淀`` -> ``海淀区``
-SUFFIXED = ("特别行政区", "自治区", "自治州", "自治县", "自治旗", "地区", "林区", "市", "区", "县", "盟", "旗", "州", "省")
+SUFFIXED = (
+    "特别行政区",
+    "自治区",
+    "自治州",
+    "自治县",
+    "自治旗",
+    "地区",
+    "林区",
+    "市",
+    "区",
+    "县",
+    "盟",
+    "旗",
+    "州",
+    "省",
+)
 
 
 class City(NamedTuple):
@@ -126,13 +199,17 @@ def join(city: str, area: str, full: str) -> str:
     return f"{city}{area}"
 
 
-def build_amap(rows: List[Tuple[int, str, str]], provinces: List[str]) -> List[Tuple[int, City, int]]:
+def build_amap(
+    rows: list[tuple[int, str, str]], provinces: list[str]
+) -> list[tuple[int, City, int]]:
     """高德：只有叶子名，靠 adcode 的形状还原层级。
 
     返回 ``(省下标, 城市, 排序键)``；排序键让区县紧跟在它所属的城市后面。
     """
-    province_of_code: Dict[str, int] = {}
-    province_is_city: Dict[str, bool] = {}  # 省级行本身是不是「市」（直辖市、特别行政区）
+    province_of_code: dict[str, int] = {}
+    province_is_city: dict[
+        str, bool
+    ] = {}  # 省级行本身是不是「市」（直辖市、特别行政区）
     for _id, name, code in rows:
         code = str(code)
         if not code.endswith("0000"):
@@ -144,10 +221,10 @@ def build_amap(rows: List[Tuple[int, str, str]], provinces: List[str]) -> List[T
                 province_of_code[code[:2]] = index
                 break
 
-    groups: Dict[str, int] = {}  # adcode 前缀 -> 组序号（省级行 / 市级行）
-    city_of: Dict[str, str] = {}  # adcode 前缀 -> 所属城市的长名称前缀
+    groups: dict[str, int] = {}  # adcode 前缀 -> 组序号（省级行 / 市级行）
+    city_of: dict[str, str] = {}  # adcode 前缀 -> 所属城市的长名称前缀
     counter = 0
-    cities: List[Tuple[int, City, int]] = []
+    cities: list[tuple[int, City, int]] = []
     for _id, name, code in rows:
         code, raw = str(code), str(name)
         prefix = code[:2]
@@ -171,7 +248,11 @@ def build_amap(rows: List[Tuple[int, str, str]], provinces: List[str]) -> List[T
                 # 没有市级行可挂靠：直辖市 / 特别行政区就当成它自己的市（正常），
                 # 省直辖的县级市只用自己的名字，并排到本省最后
                 counter += 1
-                group = counter if province_is_city.get(prefix) else counter + DIRECT_GROUP_OFFSET
+                group = (
+                    counter
+                    if province_is_city.get(prefix)
+                    else counter + DIRECT_GROUP_OFFSET
+                )
                 parent = city_of.get(prefix, "") if province_is_city.get(prefix) else ""
             area_short = shorten(shorten_autonomous(raw))
             long_name = join(parent, area_short, raw)
@@ -179,9 +260,11 @@ def build_amap(rows: List[Tuple[int, str, str]], provinces: List[str]) -> List[T
     return cities
 
 
-def build_xiaomi(rows: List[Tuple[int, str, str]], provinces: List[str]) -> List[Tuple[int, City, int]]:
+def build_xiaomi(
+    rows: list[tuple[int, str, str]], provinces: list[str]
+) -> list[tuple[int, City, int]]:
     """小米：名字自带层级（``武汉`` / ``武汉.黄陂``）。"""
-    cities: List[Tuple[int, City, int]] = []
+    cities: list[tuple[int, City, int]] = []
     for _id, name, code in rows:
         raw, code = str(name), str(code)
         # 编号形如 101200101：101 + 省份(20) + 市(01) + 区县(01)，省份序号与 provinces 表同序
@@ -191,7 +274,13 @@ def build_xiaomi(rows: List[Tuple[int, str, str]], provinces: List[str]) -> List
         if "." in raw:
             city_part, area_part = raw.split(".", 1)
             long_name = join(shorten(city_part), shorten(area_part), area_part)
-            cities.append((province, City(raw, code, with_suffix(area_part, "区"), long_name), _id))
+            cities.append(
+                (
+                    province,
+                    City(raw, code, with_suffix(area_part, "区"), long_name),
+                    _id,
+                )
+            )
         else:
             short = with_suffix(raw, "市")
             cities.append((province, City(raw, code, short, shorten(raw)), _id))
@@ -202,16 +291,28 @@ def rewrite(database: Path) -> None:
     connection = sqlite3.connect(database)
     try:
         with connection:
-            provinces = [row[0] for row in connection.execute("SELECT name FROM provinces ORDER BY _id")]
+            provinces = [
+                row[0]
+                for row in connection.execute("SELECT name FROM provinces ORDER BY _id")
+            ]
             columns = {row[1] for row in connection.execute("PRAGMA table_info(citys)")}
             # raw_name 留着，重新跑本脚本时不再依赖已经被改写过的 name
             raw_column = "raw_name" if "raw_name" in columns else "name"
             rows = [
                 (row[0], row[1], row[2])
-                for row in connection.execute(f"SELECT _id, {raw_column}, city_num FROM citys ORDER BY _id")
+                for row in connection.execute(
+                    f"SELECT _id, {raw_column}, city_num FROM citys ORDER BY _id"
+                )
             ]
-            flavour = build_xiaomi if any("." in str(name) for _id, name, _code in rows) else build_amap
-            cities = sorted(flavour(rows, provinces), key=lambda item: (item[0], item[2], item[1].city_num))
+            flavour = (
+                build_xiaomi
+                if any("." in str(name) for _id, name, _code in rows)
+                else build_amap
+            )
+            cities = sorted(
+                flavour(rows, provinces),
+                key=lambda item: (item[0], item[2], item[1].city_num),
+            )
 
             connection.execute("DROP TABLE citys")
             connection.execute(
@@ -226,7 +327,10 @@ def rewrite(database: Path) -> None:
             connection.executemany(
                 "INSERT INTO citys (province_id, raw_name, name, short_name, city_num)"
                 " VALUES (?, ?, ?, ?, ?)",
-                [(province, city.raw_name, city.long, city.short, city.city_num) for province, city, _ in cities],
+                [
+                    (province, city.raw_name, city.long, city.short, city.city_num)
+                    for province, city, _ in cities
+                ],
             )
         connection.execute("VACUUM")
     finally:

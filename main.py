@@ -15,11 +15,13 @@ A Class Widgets plugin.
 """
 
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from ClassWidgets.SDK import CW2Plugin, PluginAPI
+from loguru import logger
 from PySide6.QtCore import (
     Property,
     QObject,
@@ -29,7 +31,6 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtQml import QJSValue
-from loguru import logger
 
 from weather import geolocate, service
 from weather.cities import PROVINCE_CITY_LIMIT, SEARCH_LIMIT, built_in_cities
@@ -73,7 +74,11 @@ def _qml_to_python(value: Any) -> Any:
         return value
 
     converted = value.toVariant()
-    if converted is not None and converted is not value and not isinstance(converted, QJSValue):
+    if (
+        converted is not None
+        and converted is not value
+        and not isinstance(converted, QJSValue)
+    ):
         return _qml_to_python(converted)
     if value.isArray():
         length = int(value.property("length").toVariant() or 0)
@@ -81,7 +86,16 @@ def _qml_to_python(value: Any) -> Any:
     if value.isObject():
         # QJSValue does not expose enumerable keys consistently across Qt
         # versions; these are the keys accepted by addCityRecord().
-        keys = ("id", "name", "short_name", "code", "mode", "latitude", "longitude", "provider_codes")
+        keys = (
+            "id",
+            "name",
+            "short_name",
+            "code",
+            "mode",
+            "latitude",
+            "longitude",
+            "provider_codes",
+        )
         return {
             key: _qml_to_python(value.property(key))
             for key in keys
@@ -90,7 +104,7 @@ def _qml_to_python(value: Any) -> Any:
     return None
 
 
-def _coordinates_of(city: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+def _coordinates_of(city: dict[str, Any]) -> tuple[float | None, float | None]:
     """取出成对的经纬度；缺一个就当作没有坐标。"""
     try:
         latitude = float(city["latitude"])
@@ -105,7 +119,12 @@ class _Job(QThread):
 
     finishedWith = Signal(object)
 
-    def __init__(self, func: Callable[..., Any], args: Tuple[Any, ...], parent: Optional[QObject] = None):
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        parent: QObject | None = None,
+    ):
         super().__init__(parent)
         self._func = func
         self._args = args
@@ -119,8 +138,10 @@ class _Job(QThread):
             return
         try:
             result = self._func(*self._args)
-        except Exception as error:  # 后台任务失败只影响这一次结果，不能打断 GUI
-            logger.warning(f"后台任务 {getattr(self._func, '__name__', self._func)} 失败: {error}")
+        except Exception as error:  # noqa: BLE001 - 后台任务失败只影响这一次结果，不能打断 GUI
+            logger.warning(
+                f"后台任务 {getattr(self._func, '__name__', self._func)} 失败: {error}"
+            )
             result = None
         if not self._cancelled:
             self.finishedWith.emit(result)
@@ -137,10 +158,10 @@ class BackgroundTasks(QObject):
     ``BackgroundTasks`` 下当子对象，结束即 ``deleteLater``，不阻塞也不用管生命周期。
     """
 
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
-        self._jobs: Dict[str, _Job] = {}
-        self._generations: Dict[str, int] = {}
+        self._jobs: dict[str, _Job] = {}
+        self._generations: dict[str, int] = {}
 
     def submit(
         self,
@@ -154,7 +175,9 @@ class BackgroundTasks(QObject):
         self._generations[key] = generation
         job = _Job(func, args, self)
         job.finishedWith.connect(
-            lambda result, a=args, k=key, g=generation: self._deliver(k, g, result, on_done, a)
+            lambda result, a=args, k=key, g=generation: self._deliver(
+                k, g, result, on_done, a
+            )
         )
         # finished 在 run() 返回之后才发，所以这里丢掉引用 / 销毁线程都是安全的
         job.finished.connect(lambda w=job, k=key, g=generation: self._forget(k, g, w))
@@ -168,7 +191,7 @@ class BackgroundTasks(QObject):
         generation: int,
         result: Any,
         on_done: Callable[..., None],
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
     ) -> None:
         if self._generations.get(key) != generation:
             return  # 已经被更新的请求顶掉了
@@ -222,9 +245,9 @@ class Plugin(CW2Plugin):
         super().__init__(api)
         self.config = WeatherConfig()
         service.migrate_cities(self.config)
-        self._payload: Dict[str, Any] = {"available": False, "error": "正在获取天气…"}
-        self._city_payloads: Dict[str, Dict[str, Any]] = {}
-        self._fetch_workers: Dict[str, service.FetchWorker] = {}
+        self._payload: dict[str, Any] = {"available": False, "error": "正在获取天气…"}
+        self._city_payloads: dict[str, dict[str, Any]] = {}
+        self._fetch_workers: dict[str, service.FetchWorker] = {}
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh)
         self._tasks = BackgroundTasks(self)
@@ -232,9 +255,9 @@ class Plugin(CW2Plugin):
         self._settings_page = Path("qml") / "SettingsPage.qml"
         # 城市库查询结果缓存：第二次打开对话框时直接命中，不再等后台线程。
         # 都有上限——缓存只是省一次往返，不值得一直占着内存。
-        self._province_cache: Dict[str, List[str]] = {}
-        self._city_cache: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
-        self._search_cache: Dict[Tuple[str, str, int], List[Dict[str, Any]]] = {}
+        self._province_cache: dict[str, list[str]] = {}
+        self._city_cache: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        self._search_cache: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
         # 攒着一次把配置改动同步给 CW2，见 _config_batch
         self._sync_pending = False
         self._sync_timer = QTimer(self)
@@ -271,7 +294,7 @@ class Plugin(CW2Plugin):
 
         try:
             self.config._on_change = defer
-        except Exception:
+        except Exception:  # noqa: BLE001 - CW2 的模型不保证有这个属性，挂不上就放弃合并
             yield
             return
         try:
@@ -279,7 +302,7 @@ class Plugin(CW2Plugin):
         finally:
             try:
                 self.config._on_change = original
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - 还原失败没有别的补救办法
                 pass
             if touched["count"]:
                 self._sync_pending = True
@@ -296,7 +319,7 @@ class Plugin(CW2Plugin):
             return
         try:
             sync()
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - CW2 自己的回调，出错也不能带崩插件
             logger.warning(f"配置同步失败: {error}")
 
     def on_load(self):
@@ -311,7 +334,14 @@ class Plugin(CW2Plugin):
                 self.config.cities = named
             service.sync_legacy_location(
                 self.config,
-                next((city for city in self.config.cities if city["id"] == self.defaultCityId()), None),
+                next(
+                    (
+                        city
+                        for city in self.config.cities
+                        if city["id"] == self.defaultCityId()
+                    ),
+                    None,
+                ),
             )
         self.api.config.save()
 
@@ -332,7 +362,9 @@ class Plugin(CW2Plugin):
         self._restart_timer()
         # 城市库索引 + 拼音表提前在后台建好，用户第一次打开「添加城市」时就不用
         # 等（几十毫秒的 GIL 时间，放在这里付比放在点击之后好）。
-        self._tasks.submit("warmup", _warm_city_index, lambda *_: None, self.config.provider)
+        self._tasks.submit(
+            "warmup", _warm_city_index, lambda *_: None, self.config.provider
+        )
         # 首次安装（从未定过位）时按 IP 自动选一次城市，之后一律手动
         if not self.config.located_once and not self.config.cities:
             self.locateAutomatically()
@@ -361,7 +393,7 @@ class Plugin(CW2Plugin):
                 worker.wait(500)
         try:
             self.api.ui.unregister_settings_page(self._settings_page)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - 卸载时页面可能已经没了
             pass
 
     def _restart_timer(self):
@@ -371,7 +403,7 @@ class Plugin(CW2Plugin):
     # ------------------------------------------------------------------ 天气数据
 
     @Property("QVariant", notify=dataChanged)
-    def data(self) -> Dict[str, Any]:
+    def data(self) -> dict[str, Any]:
         return self._payload
 
     @Property(str, notify=configChanged)
@@ -400,13 +432,37 @@ class Plugin(CW2Plugin):
         cities = service.migrate_cities(self.config)
         provider = service.make_provider(self.config)
         if provider is None:
-            self._apply_for_city(None, service.build_payload(None, service.location_from_config(self.config), None, "天气源不可用"))
+            self._apply_for_city(
+                None,
+                service.build_payload(
+                    None,
+                    service.location_from_config(self.config),
+                    None,
+                    "天气源不可用",
+                ),
+            )
             return
         if provider.requires_key and not provider.api_key:
-            self._apply_for_city(None, service.build_payload(None, service.location_from_config(self.config), provider, "未填写 API Key"))
+            self._apply_for_city(
+                None,
+                service.build_payload(
+                    None,
+                    service.location_from_config(self.config),
+                    provider,
+                    "未填写 API Key",
+                ),
+            )
             return
         if not cities:
-            self._apply_for_city(None, service.build_payload(None, service.location_from_config(self.config), provider, "未选择城市"))
+            self._apply_for_city(
+                None,
+                service.build_payload(
+                    None,
+                    service.location_from_config(self.config),
+                    provider,
+                    "未选择城市",
+                ),
+            )
             return
         for city in cities:
             city_id = str(city["id"])
@@ -414,24 +470,35 @@ class Plugin(CW2Plugin):
                 continue
             location = service.location_from_city(city, self.config.provider)
             if not location.configured:
-                self._apply_for_city(city_id, service.build_payload(None, location, provider, "当前数据源没有该城市映射"))
+                self._apply_for_city(
+                    city_id,
+                    service.build_payload(
+                        None, location, provider, "当前数据源没有该城市映射"
+                    ),
+                )
                 continue
             worker = service.FetchWorker(provider, location, self)
-            worker.finishedWith.connect(lambda payload, cid=city_id: self._apply_for_city(cid, payload))
+            worker.finishedWith.connect(
+                lambda payload, cid=city_id: self._apply_for_city(cid, payload)
+            )
             worker.finished.connect(worker.deleteLater)
-            worker.finished.connect(lambda w=worker, cid=city_id: self._clear_fetch_worker(cid, w))
+            worker.finished.connect(
+                lambda w=worker, cid=city_id: self._clear_fetch_worker(cid, w)
+            )
             self._fetch_workers[city_id] = worker
             worker.start()
 
     @Slot("QVariant", dict)
-    def _apply_for_city(self, city_id: Optional[str], payload: Dict[str, Any]) -> None:
+    def _apply_for_city(self, city_id: str | None, payload: dict[str, Any]) -> None:
         if city_id:
             self._city_payloads[str(city_id)] = payload
         default_id = self.defaultCityId()
         self._payload = self._city_payloads.get(default_id, payload)
         self.dataChanged.emit()
 
-    def _clear_fetch_worker(self, city_id: str = "", worker: Optional[service.FetchWorker] = None) -> None:
+    def _clear_fetch_worker(
+        self, city_id: str = "", worker: service.FetchWorker | None = None
+    ) -> None:
         """在 worker 完成后清空引用。
 
         比对一下身份：被取消的旧 worker 迟到时不能把新 worker 的引用清掉。
@@ -442,23 +509,29 @@ class Plugin(CW2Plugin):
     # ------------------------------------------------------------------ 设置页接口
 
     @Slot(result="QVariant")
-    def providers(self) -> List[Dict[str, Any]]:
+    def providers(self) -> list[dict[str, Any]]:
         return service.describe_providers()
 
     @Slot(result="QVariant")
-    def settings(self) -> Dict[str, Any]:
+    def settings(self) -> dict[str, Any]:
         """当前配置 + 城市列表 + 当前提供商能力。"""
         provider_class = get_provider_class(self.config.provider)
         api_keys = self.config.api_keys or {}
         cities = self._city_options()
         default_id = self.defaultCityId()
         default = next((item for item in cities if item["id"] == default_id), None)
-        location = service.location_from_city(default, self.config.provider) if default else service.location_from_config(self.config)
+        location = (
+            service.location_from_city(default, self.config.provider)
+            if default
+            else service.location_from_config(self.config)
+        )
         return {
             "provider": self.config.provider,
             "providerName": provider_class.name if provider_class else "",
             "requiresKey": bool(provider_class and provider_class.requires_key),
-            "supportsCoordinates": bool(provider_class and provider_class.supports_coordinates),
+            "supportsCoordinates": bool(
+                provider_class and provider_class.supports_coordinates
+            ),
             "hasCityList": bool(provider_class and provider_class.database),
             "onlineSearch": bool(provider_class and not provider_class.database),
             "locationMode": location.mode,
@@ -479,37 +552,41 @@ class Plugin(CW2Plugin):
     @Slot(result=str)
     def defaultCityId(self) -> str:
         cities = service.migrate_cities(self.config)
-        if self.config.default_city_id and any(str(item["id"]) == self.config.default_city_id for item in cities):
+        if self.config.default_city_id and any(
+            str(item["id"]) == self.config.default_city_id for item in cities
+        ):
             return self.config.default_city_id
         return str(cities[0]["id"]) if cities else ""
 
-    def _city_options(self) -> List[Dict[str, Any]]:
+    def _city_options(self) -> list[dict[str, Any]]:
         cities = service.migrate_cities(self.config)
         default_id = self.defaultCityId()
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for city in cities:
             item = service.normalize_city(city)
             resolved = service.city_for_provider(item, self.config.provider)
             payload = self._city_payloads.get(item["id"], {})
-            item.update({
-                "provider": self.config.provider,
-                "providerCode": (resolved or {}).get("code", ""),
-                "available": bool(payload.get("available")),
-                "temperature": payload.get("temperature", ""),
-                "description": payload.get("description", ""),
-                "error": payload.get("error", ""),
-                "isDefault": item["id"] == default_id,
-                "canRemove": len(cities) > 1,
-            })
+            item.update(
+                {
+                    "provider": self.config.provider,
+                    "providerCode": (resolved or {}).get("code", ""),
+                    "available": bool(payload.get("available")),
+                    "temperature": payload.get("temperature", ""),
+                    "description": payload.get("description", ""),
+                    "error": payload.get("error", ""),
+                    "isDefault": item["id"] == default_id,
+                    "canRemove": len(cities) > 1,
+                }
+            )
             result.append(item)
         return result
 
     @Slot(result="QVariant")
-    def cityOptions(self) -> List[Dict[str, Any]]:
+    def cityOptions(self) -> list[dict[str, Any]]:
         return self._city_options()
 
     @Slot(str, result="QVariant")
-    def dataForCity(self, city_id: str) -> Dict[str, Any]:
+    def dataForCity(self, city_id: str) -> dict[str, Any]:
         return self._city_payloads.get(str(city_id), self._payload)
 
     @Slot(str)
@@ -530,7 +607,10 @@ class Plugin(CW2Plugin):
                     city = service.normalize_city(resolved, provider_id)
                 mapped.append(city)
             self.config.cities = mapped
-            service.sync_legacy_location(self.config, next((c for c in mapped if c["id"] == self.defaultCityId()), None))
+            service.sync_legacy_location(
+                self.config,
+                next((c for c in mapped if c["id"] == self.defaultCityId()), None),
+            )
         self.api.config.save()
         self.configChanged.emit()
         # 立即触发 dataChanged 确保前端能获取到最新的 requiresKey 状态
@@ -570,43 +650,75 @@ class Plugin(CW2Plugin):
             row = repository.city_for_code(code) if repository else {}
             name = name or str(row.get("name") or "")
             short_name = str(row.get("short_name") or "")
-        city = service.normalize_city({
-            "name": name, "short_name": short_name, "code": code, "mode": CITY,
-            "latitude": latitude or None, "longitude": longitude or None,
-        }, self.config.provider)
+        city = service.normalize_city(
+            {
+                "name": name,
+                "short_name": short_name,
+                "code": code,
+                "mode": CITY,
+                "latitude": latitude or None,
+                "longitude": longitude or None,
+            },
+            self.config.provider,
+        )
         self.addCityRecord(city)
 
     @Slot("QVariant")
-    def addCityRecord(self, city: Dict[str, Any]) -> None:
+    def addCityRecord(self, city: dict[str, Any]) -> None:
         city = _qml_to_python(city)
         if not isinstance(city, dict):
-            logger.warning("addCityRecord() ignored a non-object city argument: %r", city)
+            logger.warning(
+                "addCityRecord() ignored a non-object city argument: %r", city
+            )
             return
         with self._config_batch():
             self.config.located_once = True
         latitude, longitude = _coordinates_of(city)
-        if not str(city.get("name") or "").strip() and latitude is not None and longitude is not None:
+        if (
+            not str(city.get("name") or "").strip()
+            and latitude is not None
+            and longitude is not None
+        ):
             # 逆地理编码要走网络，放后台线程：主线程最多等它几百毫秒就会卡住
             # CW 的动画，也让「添加城市」按钮看起来像没反应。
             self._tasks.submit(
                 f"geocode:{latitude:.4f},{longitude:.4f}",
-                geolocate.city_name_at, self._apply_geocoded_city,
-                latitude, longitude, 5.0, dict(city),
+                geolocate.city_name_at,
+                self._apply_geocoded_city,
+                latitude,
+                longitude,
+                5.0,
+                dict(city),
             )
             return
         self._commit_city(city)
 
-    def _apply_geocoded_city(self, result: Any, latitude: float, longitude: float, _timeout: float, city: Dict[str, Any]) -> None:
+    def _apply_geocoded_city(
+        self,
+        result: Any,
+        latitude: float,
+        longitude: float,
+        _timeout: float,
+        city: dict[str, Any],
+    ) -> None:
         """逆地理编码结束后回到 GUI 线程，把真名补上。"""
         name = str(result or "").strip()
         self._commit_city(city | {"name": name or f"{latitude:.2f}, {longitude:.2f}"})
 
-    def _commit_city(self, city: Dict[str, Any]) -> None:
+    def _commit_city(self, city: dict[str, Any]) -> None:
         """把一条城市记录合并进配置并刷新天气（只在 GUI 线程执行）。"""
         with self._config_batch():
             record = service.normalize_city(city, self.config.provider)
             existing = service.migrate_cities(self.config)
-            duplicate = next((item for item in existing if item.get("name") == record.get("name") and item.get("mode") == record.get("mode")), None)
+            duplicate = next(
+                (
+                    item
+                    for item in existing
+                    if item.get("name") == record.get("name")
+                    and item.get("mode") == record.get("mode")
+                ),
+                None,
+            )
             if duplicate:
                 record["id"] = duplicate["id"]
                 merged_codes = dict(duplicate.get("provider_codes") or {})
@@ -618,7 +730,14 @@ class Plugin(CW2Plugin):
             self.config.cities = existing
             if not self.config.default_city_id:
                 self.config.default_city_id = record["id"]
-            default = next((item for item in existing if item["id"] == self.config.default_city_id), record)
+            default = next(
+                (
+                    item
+                    for item in existing
+                    if item["id"] == self.config.default_city_id
+                ),
+                record,
+            )
             service.sync_legacy_location(self.config, default)
         self.api.config.save()
         self.configChanged.emit()
@@ -635,7 +754,10 @@ class Plugin(CW2Plugin):
             self.config.cities = cities
             if self.config.default_city_id == str(city_id):
                 self.config.default_city_id = str(cities[0]["id"])
-            service.sync_legacy_location(self.config, next(item for item in cities if item["id"] == self.defaultCityId()))
+            service.sync_legacy_location(
+                self.config,
+                next(item for item in cities if item["id"] == self.defaultCityId()),
+            )
         self.api.config.save()
         self.configChanged.emit()
         self._cancel_fetch_workers()
@@ -643,29 +765,44 @@ class Plugin(CW2Plugin):
 
     @Slot(str)
     def setDefaultCity(self, city_id: str) -> None:
-        if not any(str(item.get("id")) == str(city_id) for item in service.migrate_cities(self.config)):
+        if not any(
+            str(item.get("id")) == str(city_id)
+            for item in service.migrate_cities(self.config)
+        ):
             return
         with self._config_batch():
             self.config.default_city_id = str(city_id)
-            service.sync_legacy_location(self.config, next(item for item in self.config.cities if item["id"] == self.config.default_city_id))
+            service.sync_legacy_location(
+                self.config,
+                next(
+                    item
+                    for item in self.config.cities
+                    if item["id"] == self.config.default_city_id
+                ),
+            )
         self.api.config.save()
         self.configChanged.emit()
-        self._apply_for_city(self.config.default_city_id, self._city_payloads.get(self.config.default_city_id, self._payload))
+        self._apply_for_city(
+            self.config.default_city_id,
+            self._city_payloads.get(self.config.default_city_id, self._payload),
+        )
 
     @Slot(float, float, str)
     def setCoordinates(self, latitude: float, longitude: float, name: str) -> None:
         """设置坐标位置；如果 name 为空，会在后台做逆地理编码。"""
-        self.addCityRecord({
-            "name": name or "",
-            "mode": COORDINATES,
-            "latitude": latitude,
-            "longitude": longitude,
-        })
+        self.addCityRecord(
+            {
+                "name": name or "",
+                "mode": COORDINATES,
+                "latitude": latitude,
+                "longitude": longitude,
+            }
+        )
 
     # ------------------------------------------------------------------ 城市列表（异步）
 
     @Slot(result="QVariant")
-    def provinces(self) -> List[str]:
+    def provinces(self) -> list[str]:
         """请求省份列表。结果通过 :attr:`provincesLoaded` 回传。
 
         已经拿到过数据时同步返回缓存，QML 可以立刻渲染，不必等后台线程。
@@ -676,7 +813,9 @@ class Plugin(CW2Plugin):
             return cached
         self._tasks.submit(
             "provinces",
-            _load_provinces, self._publish_provinces, provider_id,
+            _load_provinces,
+            self._publish_provinces,
+            provider_id,
         )
         return []
 
@@ -686,7 +825,7 @@ class Plugin(CW2Plugin):
         self.provincesLoaded.emit(provider_id, provinces)
 
     @Slot(int, result="QVariant")
-    def citiesIn(self, province_index: int) -> List[Dict[str, Any]]:
+    def citiesIn(self, province_index: int) -> list[dict[str, Any]]:
         """请求某个省份（或热门城市）的列表，结果通过 :attr:`cityListLoaded` 回传。"""
         provider_id = self.config.provider
         key = (provider_id, int(province_index))
@@ -695,11 +834,16 @@ class Plugin(CW2Plugin):
             return cached
         self._tasks.submit(
             "cities",
-            _load_cities, self._publish_cities, provider_id, int(province_index),
+            _load_cities,
+            self._publish_cities,
+            provider_id,
+            int(province_index),
         )
         return []
 
-    def _publish_cities(self, result: Any, provider_id: str, province_index: int) -> None:
+    def _publish_cities(
+        self, result: Any, provider_id: str, province_index: int
+    ) -> None:
         cities = list(result or [])
         if len(self._city_cache) >= _CITY_CACHE_LIMIT:
             self._city_cache.clear()
@@ -727,18 +871,29 @@ class Plugin(CW2Plugin):
         provider = service.make_provider(self.config)
         if service.repository_for(provider_id) is not None:
             self._tasks.submit(
-                "search", _search_local_cities, self._publish_search,
-                provider_id, term, province_index,
+                "search",
+                _search_local_cities,
+                self._publish_search,
+                provider_id,
+                term,
+                province_index,
             )
         elif provider is not None:
             self._tasks.submit(
-                "search", _search_online_cities, self._publish_search,
-                provider_id, term, province_index, provider,
+                "search",
+                _search_online_cities,
+                self._publish_search,
+                provider_id,
+                term,
+                province_index,
+                provider,
             )
         else:
             self.citiesFound.emit(term, province_index, [])
 
-    def _publish_search(self, result: Any, provider_id: str, term: str, province_index: int) -> None:
+    def _publish_search(
+        self, result: Any, provider_id: str, term: str, province_index: int
+    ) -> None:
         cities = list(result or [])
         if len(self._search_cache) >= _SEARCH_CACHE_LIMIT:
             self._search_cache.clear()
@@ -775,7 +930,7 @@ class Plugin(CW2Plugin):
         self.configChanged.emit()
 
 
-def _load_provinces(provider_id: str) -> List[str]:
+def _load_provinces(provider_id: str) -> list[str]:
     repository = service.repository_for(provider_id)
     return repository.provinces() if repository else []
 
@@ -787,7 +942,7 @@ def _warm_city_index(provider_id: str) -> None:
         repository.warm_up()
 
 
-def _load_cities(provider_id: str, province_index: int) -> List[Dict[str, Any]]:
+def _load_cities(provider_id: str, province_index: int) -> list[dict[str, Any]]:
     """工作线程：建索引 + 取列表。"""
     repository = service.repository_for(provider_id)
     if repository is None:
@@ -796,7 +951,9 @@ def _load_cities(provider_id: str, province_index: int) -> List[Dict[str, Any]]:
     return repository.cities(province_index, PROVINCE_CITY_LIMIT)
 
 
-def _search_local_cities(provider_id: str, term: str, province_index: int) -> List[Dict[str, Any]]:
+def _search_local_cities(
+    provider_id: str, term: str, province_index: int
+) -> list[dict[str, Any]]:
     repository = service.repository_for(provider_id)
     if repository is None:
         return []
@@ -804,19 +961,21 @@ def _search_local_cities(provider_id: str, term: str, province_index: int) -> Li
     return repository.search(term, SEARCH_LIMIT, scope)
 
 
-def _search_online_cities(provider_id: str, term: str, province_index: int, provider: Any) -> List[Dict[str, Any]]:
+def _search_online_cities(
+    provider_id: str, term: str, province_index: int, provider: Any
+) -> list[dict[str, Any]]:
     try:
         return list(provider.search_cities(term) or [])[:SEARCH_LIMIT]
-    except Exception:
+    except Exception:  # noqa: BLE001 - 在线搜索失败就当没搜到
         return []
 
 
-def _locate(provider_id: str) -> Optional[Dict[str, Any]]:
+def _locate(provider_id: str) -> dict[str, Any] | None:
     """工作线程：IP 粗定位 + 换算成当前数据源能用的位置。"""
     try:
         fix = geolocate.locate()
         if not fix:
             return None
         return service.resolve_auto_location(provider_id, fix) or {}
-    except Exception:
+    except Exception:  # noqa: BLE001 - 定位失败退回手动选城市
         return {}
