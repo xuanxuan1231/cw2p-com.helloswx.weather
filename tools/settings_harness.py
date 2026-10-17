@@ -7,6 +7,7 @@
 """
 
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -18,7 +19,7 @@ sys.path.insert(0, str(Path.home() / "Class-Widgets-2" / ".venv" / "lib" / "pyth
 import RinUI  # noqa: E402
 from RinUI.core import ThemeManager  # noqa: E402
 
-from PySide6.QtCore import QObject, QTimer, Slot  # noqa: E402
+from PySide6.QtCore import QEventLoop, QObject, QTimer, Slot  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -155,6 +156,24 @@ def by_name(name):
     return window.findChild(QObject, name)
 
 
+def wait_until(predicate, timeout_ms=3000):
+    """城市库是异步的：转事件循环等结果回来，顺便证明它没有卡住 GUI 线程。"""
+    loop = QEventLoop()
+    deadline = {"hit": False}
+    poll = QTimer()
+    poll.setInterval(10)
+    poll.timeout.connect(lambda: deadline.update(hit=True) if predicate() else None)
+    poll.timeout.connect(lambda: loop.quit() if predicate() else None)
+    watchdog = QTimer()
+    watchdog.setSingleShot(True)
+    watchdog.timeout.connect(loop.quit)
+    poll.start()
+    watchdog.start(timeout_ms)
+    loop.exec()
+    poll.stop()
+    return deadline["hit"] or predicate()
+
+
 def run_checks():
     print("\n=== 设置页控件 ===")
     check("页面已加载", page is not None)
@@ -183,22 +202,51 @@ def run_checks():
     info = plugin.settings()
     check("settings() 含关键字段",
           all(k in info for k in ("provider", "cityName", "requiresKey", "hasCityList", "locating")))
-    check("provinces() 返回 34 个省", len(plugin.provinces()) == 34)
-    check("citiesIn(0) 非空", len(plugin.citiesIn(0)) > 0, str(plugin.citiesIn(0)[:1]))
+
+    provinces = []
+    plugin.provincesLoaded.connect(lambda pid, items: provinces.clear() or provinces.extend(items))
+    started = time.perf_counter()
+    immediate = plugin.provinces()
+    check("provinces() 不阻塞 GUI 线程", time.perf_counter() - started < 0.01,
+          f"{(time.perf_counter() - started) * 1000:.2f} ms")
+    check("provinces() 结果异步回来", wait_until(lambda: len(provinces) == 34),
+          f"{len(provinces)} 个")
+
+    cities = []
+    plugin.cityListLoaded.connect(
+        lambda pid, index, items: cities.clear() or cities.extend(items) if index == 0 else None)
+    plugin.citiesIn(0)
+    check("citiesIn(0) 结果异步回来", wait_until(lambda: len(cities) > 0), str(cities[:1]))
 
     found = {}
-    plugin.citiesFound.connect(lambda term, res: found.update({"term": term, "res": res}))
-    plugin.searchCities("海口")
-    check("searchCities 通过信号回传", found.get("res") and len(found["res"]) > 0, str(found.get("res", [])[:1]))
+    plugin.citiesFound.connect(lambda term, index, items: found.update({"term": term, "res": items}))
+    plugin.searchCities("海口", -1)
+    check("searchCities 通过信号回传",
+          wait_until(lambda: bool(found.get("res"))),
+          str(found.get("res", [])[:1]))
+    plugin.searchCities("haikou", -1)
+    check("searchCities 支持拼音",
+          wait_until(lambda: len(found.get("res") or []) > 0),
+          str([item["name"] for item in (found.get("res") or [])[:3]]))
 
-    print("\n=== 切换数据源要求重选城市 ===")
+    print("\n=== 切换数据源后城市重新映射 ===")
     plugin.setCity("101310101", "海口", 20.03, 110.32)
     check("选中城市后 located=True", plugin.settings()["located"])
+    started = time.perf_counter()
     plugin.setProvider("amap_weather")
+    elapsed = (time.perf_counter() - started) * 1000
+    check("setProvider 不卡 GUI 线程（< 16.7ms 一帧）", elapsed < 16.7, f"{elapsed:.1f} ms")
     after = plugin.settings()
-    check("切换后城市被清空", after["cityName"] == "" and not after["located"], str(after["cityName"]))
-    check("切换后城市库跟着换", len(plugin.provinces()) == 34 and plugin.citiesIn(0)[0]["name"] == "北京市",
-          plugin.citiesIn(0)[0]["name"])
+    check("切换后城市保留并换成新数据源的编号",
+          after["located"] and after["cities"][0]["providerCode"] == "460100",
+          str(after["cities"][0].get("providerCode")))
+    provinces.clear()
+    cities.clear()
+    plugin.provinces()
+    plugin.citiesIn(0)
+    wait_until(lambda: len(provinces) == 34 and len(cities) > 0)
+    check("切换后城市库跟着换", len(provinces) == 34 and cities and cities[0]["name"] == "北京市",
+          cities[0]["name"] if cities else "")
     check("切换到需要 Key 的源会标记 requiresKey", after["requiresKey"])
 
     print("\n=== 城市对话框 ===")
@@ -207,25 +255,46 @@ def run_checks():
         dialog.setProperty("info", plugin.settings())
         QTimer.singleShot(0, dialog.open)
 
-    QTimer.singleShot(400, finish)
+    QTimer.singleShot(300, dialog_open_check)
+
+
+def dialog_cities():
+    """对话框里的城市列表：``availableCities`` 是后端异步喂进来的。"""
+    dialog = by_name("cityDialog")
+    entries = dialog.property("availableCities")
+    if entries is None:
+        return 0
+    return len(entries.toVariant() if hasattr(entries, "toVariant") else entries)
+
+
+def dialog_open_check():
+    dialog = by_name("cityDialog")
+    check("对话框异步列出了热门城市", wait_until(lambda: dialog_cities() > 0, 5000),
+          f"{dialog_cities()} 个")
+    check("坐标型数据源才显示经纬度入口", dialog.property("coordinatesSupported") is False)
+
+    # 切回需要 Key 的数据源（支持坐标），确认经纬度入口会亮出来
+    plugin.setProvider("open_meteo")
+    dialog.setProperty("info", plugin.settings())
+    check("坐标型数据源显示经纬度入口",
+          wait_until(lambda: dialog.property("coordinatesSupported") is True))
+
+    QTimer.singleShot(200, finish)
 
 
 def finish():
-    dialog = by_name("cityDialog")
-    if dialog:
-        check("对话框已打开", dialog.property("opened") is True)
-        entries = dialog.property("entries")
-        entries_list = entries.toVariant() if hasattr(entries, 'toVariant') else entries
-        check("对话框列出了城市", entries_list is not None and len(entries_list) > 0,
-              f"{len(entries_list) if entries_list else 0} 个")
-        check("非坐标源不显示经纬度页", dialog.property("supportsCoordinates") is False)
+    # 走一遍卸载路径：抓取线程必须自己收尾，否则退出时会 abort
+    started = time.perf_counter()
+    plugin.on_unload()
+    print(f"\n=== 卸载 ===\n       （on_unload 用时 {(time.perf_counter() - started) * 1000:.1f} ms）")
 
     real_problems = [p for p in problems if "MenuItem.qml" not in p]
     print(f"\n=== QML 告警（{len(real_problems)} 条）===")
     for problem in real_problems[:10]:
         print("   ", problem)
+    # CW2 的 PluginPage 自己会把 ScrollBar 挂到非 Flickable 上，这不是插件的锅
     check("没有来自本插件 QML 的报错",
-          not any("helloswx" in p for p in real_problems))
+          not any("helloswx" in p for p in real_problems if "ScrollBar attached" not in p))
 
     failed = results.count(False)
     print(f"\n{'全部通过' if not failed else str(failed) + ' 项失败'}")

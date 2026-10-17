@@ -72,7 +72,13 @@ def normalize_city(city: Dict[str, Any], provider_id: str = "") -> Dict[str, Any
 
 
 def migrate_cities(config: WeatherConfig) -> List[Dict[str, Any]]:
-    """Migrate the legacy single-location fields into the city list once."""
+    """Migrate the legacy single-location fields into the city list once.
+
+    只在内容真的变了的时候写回 ``config``。CW2 的配置模型每写一个字段都会触发一次
+    全量同步（``model_dump`` + ``configChanged``，主窗口里所有绑定在 ``Configs.data``
+    上的地方都要重算），实测一次 ~270ms，而写一个没变化的字段和写新字段一样贵。
+    这个函数在 ``settings()`` 这类只读路径上也会被调用，所以必须无写入。
+    """
     cities = [normalize_city(item, config.provider) for item in (config.cities or [])]
     if not cities and (config.city_code or config.city_name or config.latitude is not None):
         legacy_name = config.city_name
@@ -87,7 +93,8 @@ def migrate_cities(config: WeatherConfig) -> List[Dict[str, Any]]:
             "latitude": config.latitude,
             "longitude": config.longitude,
         }, config.provider)]
-    config.cities = cities
+    if cities != (config.cities or []):
+        config.cities = cities
     if cities and (not config.default_city_id or config.default_city_id not in {item["id"] for item in cities}):
         config.default_city_id = cities[0]["id"]
     return cities
@@ -104,7 +111,9 @@ def city_for_provider(city: Dict[str, Any], provider_id: str) -> Optional[Dict[s
     if not code and provider_id:
         repository = repository_for(provider_id)
         if repository and record.get("name"):
-            matches = repository.search(record["name"], limit=1)
+            # 只按汉字名查：这条路径在主线程上跑（切换数据源 / 设为默认城市），
+            # 不能触发拼音索引构建。
+            matches = repository.search_by_name(record["name"], limit=1)
             if matches:
                 code = matches[0]["code"]
                 record["provider_codes"][provider_id] = str(code)
@@ -132,20 +141,33 @@ def location_from_city(city: Dict[str, Any], provider_id: str) -> Location:
 
 
 def sync_legacy_location(config: WeatherConfig, city: Optional[Dict[str, Any]]) -> None:
-    """Keep legacy fields usable for older plugin/widget code and upgrades."""
+    """Keep legacy fields usable for older plugin/widget code and upgrades.
+
+    同样只写真正变化的字段——见 :func:`migrate_cities` 里关于 CW2 配置同步代价的说明。
+    """
     if not city:
-        config.location_mode = CITY
-        config.city_code = ""
-        config.city_name = ""
-        config.latitude = None
-        config.longitude = None
+        legacy = (CITY, "", "", None, None)
+    else:
+        resolved = city_for_provider(city, config.provider) or normalize_city(city)
+        legacy = (
+            str(resolved.get("mode") or CITY),
+            str(resolved.get("code") or ""),
+            str(resolved.get("name") or ""),
+            resolved.get("latitude"),
+            resolved.get("longitude"),
+        )
+    current = (
+        config.location_mode,
+        config.city_code,
+        config.city_name,
+        config.latitude,
+        config.longitude,
+    )
+    if legacy == current:
         return
-    resolved = city_for_provider(city, config.provider) or normalize_city(city)
-    config.location_mode = str(resolved.get("mode") or CITY)
-    config.city_code = str(resolved.get("code") or "")
-    config.city_name = str(resolved.get("name") or "")
-    config.latitude = resolved.get("latitude")
-    config.longitude = resolved.get("longitude")
+    for field, value in zip(("location_mode", "city_code", "city_name", "latitude", "longitude"), legacy):
+        if getattr(config, field) != value:
+            setattr(config, field, value)
 
 
 def _format_temperature(value: Optional[float]) -> str:
@@ -335,13 +357,16 @@ class FetchWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                return
             snapshot = self._provider.fetch(self._location)
             payload = build_payload(snapshot, self._location, self._provider)
         except ProviderError as error:
             payload = build_payload(None, self._location, self._provider, str(error))
         except Exception as error:  # 提供商解析异常不应让线程崩溃
             payload = build_payload(None, self._location, self._provider, f"解析失败：{error}")
-        self.finishedWith.emit(payload)
+        if not self.isInterruptionRequested():
+            self.finishedWith.emit(payload)
 
 
 def describe_providers() -> List[Dict[str, Any]]:
