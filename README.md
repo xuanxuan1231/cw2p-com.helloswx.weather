@@ -11,13 +11,11 @@
 
 </div>
 
-> [!WARNING]
-> **关于兼容性**
-> 本插件依赖 `sqlite3` 运行。Class Widgets 2 本体将在 PR[#207](https://github.com/RinLit-233-shiroko/Class-Widgets-2/pull/207) 或 [#222](https://github.com/RinLit-233-shiroko/Class-Widgets-2/pull/207) 之一被合并后，的第一个版本中携带所有标准库，包括 `sqlite3`。在此之后，您应该可以正常使用本插件。
-> 截至当前 (26/10/5 11:48)，v0.1.1 还不能被 CW2 正常加载。
 
 ## 介绍 / Introduction
 Class Widgets 2 的天气插件。
+
+喵喵喵可以的话给我 [仓库](https://github.com/xuanxuan1231/cw2p-com.helloswx.weather) 点个 Star 喵
 
 
 ## 使用 / Usage
