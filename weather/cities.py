@@ -1,4 +1,7 @@
-"""城市数据库查询（data/*.db 来自 Class Widgets）。
+"""城市数据库查询（data/*.db 来自 Class Widgets，名字由 tools/build_city_names.py 重写）。
+
+每个城市有两套名字：``name`` 是长名称（``北京海淀``，列表和 CityClip 用），
+``short_name`` 是短名称（``海淀区``，只给小组件显示）。
 
 GUI 线程上绝不能做的事都集中在这里，所以查询分成两类：
 
@@ -53,6 +56,9 @@ _NAME_CACHE_LIMIT = 256
 #: 离线生成的拼音表，见 tools/build_city_pinyin.py
 PINYIN_TABLE = DATA_DIR / "city_pinyin.json"
 
+#: 取一行的列：长名称、短名称、编号、省下标、排序权重
+_COLUMNS = "name, short_name, city_num, province_id, _id"
+
 _pinyin_tables: Dict[str, Dict[str, str]] = {}
 _pinyin_tables_lock = threading.Lock()
 _converter: Any = None
@@ -99,7 +105,7 @@ def _pinyin_syllables(name: str) -> List[str]:
 
 
 def coordinates_for_city(name: str) -> Optional[Tuple[float, float]]:
-    return _MAJOR_COORDINATES.get(_display_name(str(name or "")))
+    return _MAJOR_COORDINATES.get(_plain(str(name or "")))
 
 
 def built_in_cities() -> List[Dict[str, Any]]:
@@ -111,6 +117,7 @@ def built_in_cities() -> List[Dict[str, Any]]:
     return [
         {
             "name": name,
+            "short_name": name,
             "code": "",
             "pinyin": "",
             "pinyin_abbr": "",
@@ -122,31 +129,13 @@ def built_in_cities() -> List[Dict[str, Any]]:
     ]
 
 
-def _display_name(raw: str) -> str:
-    """``北京.海淀`` -> ``北京 海淀``。"""
-    return raw.replace(".", " ")
-
-
 def _plain(text: str) -> str:
-    return text.replace(" ", "").replace(".", "")
-
-
-def _build_index_rows(rows: List[Tuple[str, str, int, int]]) -> List[Dict[str, Any]]:
-    """把 SQL 行变成内存索引；拼音留给 :meth:`_CityIndex.searchable` 补齐。"""
-    return [
-        {
-            "name": _display_name(name),
-            "code": str(code),
-            "province_id": int(province_id),
-            "order": int(order),
-            **_coordinates_of(name),
-        }
-        for name, code, province_id, order in rows
-    ]
+    """去掉分隔符，只留汉字：``北京 海淀`` -> ``北京海淀``。"""
+    return str(text or "").replace(" ", "").replace(".", "")
 
 
 def _coordinates_of(name: str) -> Dict[str, float]:
-    coordinates = _MAJOR_COORDINATES.get(_display_name(name))
+    coordinates = _MAJOR_COORDINATES.get(_plain(name))
     return {"latitude": coordinates[0], "longitude": coordinates[1]} if coordinates else {}
 
 
@@ -166,7 +155,7 @@ class _CityIndex:
         self._searchable: Optional[List[Dict[str, Any]]] = None
         self._by_name: Dict[str, Dict[str, Any]] = {}
         self._by_code: Dict[str, Dict[str, Any]] = {}
-        self._name_lookup: Dict[str, str] = {}
+        self._row_lookup: Dict[str, Dict[str, Any]] = {}
         self._name_cache: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
 
     @property
@@ -190,24 +179,30 @@ class _CityIndex:
             return self._provinces
 
     def name_for_code(self, code: str) -> str:
+        return str(self.city_for_code(code).get("name") or "")
+
+    def city_for_code(self, code: str) -> Dict[str, Any]:
+        """按编号取一行（长名称 + 短名称）。
+
+        全库索引还没建时只查这一行：把整张表读成 dict 比一次全表扫描还贵
+        （amap 的城市库有三千多行，几毫秒的差别在主线程上是能感觉到的）。
+        """
         if not code:
-            return ""
+            return {}
         with self._lock:
             if self._rows is not None:
                 row = self._by_code.get(str(code))
-                return row["name"] if row else ""
-            cached = self._name_lookup.get(str(code))
+                return dict(row) if row else {}
+            cached = self._row_lookup.get(str(code))
         if cached is not None:
-            return cached
-        # 全库索引还没建时只查这一行：把整张表读成 dict 比一次全表扫描还贵
-        # （amap 的城市库有三千多行，几毫秒的差别在主线程上是能感觉到的）
-        rows = self._query("SELECT name FROM citys WHERE city_num = ? LIMIT 1", (str(code),))
-        name = _display_name(rows[0][0]) if rows else ""
+            return dict(cached)
+        rows = self._query(f"SELECT {_COLUMNS} FROM citys WHERE city_num = ? LIMIT 1", (str(code),))
+        city = _row_to_city(*rows[0]) if rows else {}
         with self._lock:
-            if len(self._name_lookup) >= _NAME_CACHE_LIMIT:
-                self._name_lookup.clear()
-            self._name_lookup[str(code)] = name
-        return name
+            if len(self._row_lookup) >= _NAME_CACHE_LIMIT:
+                self._row_lookup.clear()
+            self._row_lookup[str(code)] = dict(city)
+        return city
 
     def find_by_name(self, term: str, limit: int = 1) -> List[Dict[str, Any]]:
         """按汉字名模糊匹配（只用汉字名，不碰拼音表）。
@@ -215,7 +210,7 @@ class _CityIndex:
         数据源切换时 / 每次刷新都要给已有城市找编号，会在主线程上调用，所以这里
         必须保持毫秒级：全库索引已经建好就直接在内存里过滤，否则退回一次 SQL。
         """
-        term = _strip_region(term)
+        term = _strip_region(_plain(term))
         if not term:
             return []
         key = (term, int(limit))
@@ -226,16 +221,16 @@ class _CityIndex:
             return [dict(row) for row in cached]
         if rows is None:
             matched = [
-                _row_to_city(name, code, province_id, order)
-                for name, code, province_id, order in self._query(
-                    "SELECT name, city_num, province_id, _id FROM citys WHERE name LIKE ?"
+                _row_to_city(*row)
+                for row in self._query(
+                    f"SELECT {_COLUMNS} FROM citys WHERE name LIKE ? OR short_name LIKE ?"
                     " ORDER BY LENGTH(name), _id LIMIT ?",
-                    (f"%{term}%", int(limit)),
+                    (f"%{term}%", f"%{term}%", int(limit)),
                 )
             ]
         else:
-            matched = [row for row in rows if term in row["name"]]
-            matched.sort(key=lambda row: (len(row["name"]), row["order"]))
+            matched = [row for row in rows if _name_hit(row, term)]
+            matched.sort(key=lambda row: (_name_rank(row, term), len(row["name"]), row["order"]))
             matched = [dict(row) for row in matched[:limit]]
         with self._lock:
             if len(self._name_cache) >= _NAME_CACHE_LIMIT:
@@ -261,7 +256,7 @@ class _CityIndex:
             else:
                 # 库里没有这个名字时仍然展示，方便只认坐标的数据源
                 result.append({
-                    "name": name, "code": "", "pinyin": "", "pinyin_abbr": "",
+                    "name": name, "short_name": name, "code": "", "pinyin": "", "pinyin_abbr": "",
                     "latitude": latitude, "longitude": longitude,
                 })
         return result
@@ -273,7 +268,7 @@ class _CityIndex:
             if self._rows is not None:
                 return self._rows
             rows = _build_index_rows(self._query(
-                "SELECT name, city_num, province_id, _id FROM citys ORDER BY province_id, _id"
+                f"SELECT {_COLUMNS} FROM citys ORDER BY province_id, _id"
             ))
             by_name: Dict[str, Dict[str, Any]] = {}
             by_code: Dict[str, Dict[str, Any]] = {}
@@ -288,24 +283,18 @@ class _CityIndex:
     def searchable(self) -> List[Dict[str, Any]]:
         """带拼音的全量索引；第一次调用要读一次拼音表。
 
-        整个构建都在锁里，所以无论多少个线程同时搜，只有一个人真的在建索引。
+        长名称和短名称各有一套拼音：列表里显示长名称，但「海淀区」这种只带短名的
+        关键词、以及 ``hd`` 这样的首字母缩写，得靠短名称的拼音才命中。
         """
         with self._lock:
             if self._searchable is None:
                 table = _pinyin_table(self._database)
                 searchable: List[Dict[str, Any]] = []
                 for row in self._ensure_rows():
-                    syllables = table.get(row["name"])
-                    if syllables is None:
-                        syllables = " ".join(_pinyin_syllables(row["name"]))
-                    parts = syllables.split()
                     searchable.append(row | {
-                        "pinyin": "".join(parts),
-                        "pinyin_abbr": "".join(part[:1] for part in parts),
-                        # 音节之间留空格：子串匹配必须落在音节边界上，否则
-                        # 「hangzhou」会命中「changzhou」。
-                        "pinyin_parts": " " + " ".join(parts),
-                        "abbr_parts": " " + " ".join(part[:1] for part in parts),
+                        **_pinyin_fields(row["name"], table),
+                        **{f"short_{key}": value for key, value in
+                           _pinyin_fields(row["short_name"], table).items()},
                     })
                 self._searchable = searchable
             return self._searchable
@@ -332,7 +321,7 @@ class _CityIndex:
         province_index: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """汉字 / 全拼 / 首字母三种匹配，跨省（可限定省份）。"""
-        term = _strip_region(term)
+        term = _strip_region(_plain(term))
         if not term:
             return []
         needle = term.lower()
@@ -341,13 +330,12 @@ class _CityIndex:
         if province_index is not None and province_index >= 0:
             rows = [row for row in rows if row["province_id"] == province_index]
 
-        matched: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = []
+        matched: List[Tuple[Tuple[int, int, str], Dict[str, Any]]] = []
         for row in rows:
             rank = _match_rank(row, needle)
             if rank is not None:
-                name = row["name"]
-                # 同分时短的、且是「市 / 县」本体的排前面（西安 ≺ 西安区）
-                matched.append(((rank, len(name), 0 if name[-1:] in ("市", "县") else 1, name), row))
+                # 同分时名字短的先来（武汉 ≺ 武汉黄陂，xian 命中西安 ≺ 咸阳乾县）
+                matched.append(((rank, len(row["name"]), row["name"]), row))
         matched.sort(key=lambda item: item[0])
         return [dict(row) for _, row in matched[:limit]]
 
@@ -368,7 +356,45 @@ def index_for(database: str) -> _CityIndex:
 
 
 def _strip_region(term: str) -> str:
-    return str(term or "").strip().replace("市", "").replace("区", "")
+    """去掉末尾的行政后缀：``武汉市`` -> ``武汉``、``海淀区`` -> ``海淀``。"""
+    text = str(term or "").strip()
+    while len(text) > 2 and text[-1] in ("市", "区", "县"):
+        text = text[:-1]
+    return text
+
+
+def _build_index_rows(rows: List[Tuple[str, str, str, int, int]]) -> List[Dict[str, Any]]:
+    """把 SQL 行变成内存索引；拼音留给 :meth:`_CityIndex.searchable` 补齐。"""
+    return [_row_to_city(*row) for row in rows]
+
+
+def _row_to_city(name: str, short_name: str, code: str, province_id: int, order: int) -> Dict[str, Any]:
+    """一行城市记录。``name`` 是长名称（列表用），``short_name`` 是短名称（小组件用）。"""
+    name = str(name)
+    return {
+        "name": name,
+        "short_name": str(short_name or name),
+        "code": str(code),
+        "province_id": int(province_id),
+        "order": int(order),
+        **_coordinates_of(name),
+    }
+
+
+def _pinyin_fields(name: str, table: Dict[str, str]) -> Dict[str, str]:
+    """一个名字的全拼 / 首字母，以及带音节边界的搜索串。"""
+    syllables = table.get(name)
+    if syllables is None:
+        syllables = " ".join(_pinyin_syllables(name))
+    parts = syllables.split()
+    return {
+        "pinyin": "".join(parts),
+        "pinyin_abbr": "".join(part[:1] for part in parts),
+        # 音节之间留空格：子串匹配必须落在音节边界上，否则
+        # 「hangzhou」会命中「changzhou」。
+        "pinyin_parts": " " + " ".join(parts),
+        "abbr_parts": " " + " ".join(part[:1] for part in parts),
+    }
 
 
 def _is_pinyin_query(needle: str) -> bool:
@@ -376,41 +402,65 @@ def _is_pinyin_query(needle: str) -> bool:
     return any(character.isascii() and character.isalpha() for character in needle)
 
 
+def _name_hit(row: Dict[str, Any], term: str) -> bool:
+    return term in row["name"] or term in row["short_name"]
+
+
+def _name_rank(row: Dict[str, Any], term: str) -> int:
+    """按名字找编号时的优先级：长名称全等 > 短名称全等 > 长名称前缀 > 其它。"""
+    if row["name"] == term:
+        return 0
+    if row["short_name"] == term:
+        return 1
+    if row["name"].startswith(term):
+        return 2
+    return 3
+
+
 def _match_rank(row: Dict[str, Any], needle: str) -> Optional[int]:
     """命中返回排序权重（越小越靠前），不命中返回 ``None``。
 
-    拼音子串一律要求落在音节边界上，否则「changzhou」（常州）会被「hangzhou」
-    命中。索引没建拼音时（纯汉字查询）只按名字匹配。
+    同一档匹配质量下长名称优先于短名称（「海淀区」和「北京海淀」都能搜到海淀）；
+    拼音子串一律要求落在音节边界上，否则「changzhou」（常州）会被「hangzhou」命中。
+    索引没建拼音时（纯汉字查询）只按名字匹配。
     """
-    name = row["name"]
-    if name == needle or (name.startswith(needle) and name[len(needle):] in ("市", "县")):
+    name, short = row["name"], row["short_name"]
+    if needle == name:
         return 0
-    if name.startswith(needle):
+    if needle == short:
         return 1
-    if needle in name:
+    if name.startswith(needle):
         return 2
-    abbreviation = row.get("pinyin_abbr")
-    if not abbreviation:
-        return None
-    if abbreviation.startswith(needle):
+    if needle in name:
         return 3
-    if row["pinyin"].startswith(needle):
+    if short.startswith(needle):
         return 4
-    if f" {needle}" in row["pinyin_parts"]:
+    if needle in short:
         return 5
-    if needle in row["abbr_parts"]:
-        return 6
+    if not row.get("pinyin"):
+        return None
+    # 按「匹配质量」分档，同一档里长名称优先：``hdq`` 命中的是「海淀区」而不是海东市
+    for step in range(5):
+        for key, base in (("", 6), ("short_", 7)):
+            if _pinyin_step(row, needle, key, step):
+                return base + step
     return None
 
 
-def _row_to_city(name: str, code: str, province_id: int, order: int) -> Dict[str, Any]:
-    return {
-        "name": _display_name(name),
-        "code": str(code),
-        "province_id": int(province_id),
-        "order": int(order),
-        **_coordinates_of(name),
-    }
+def _pinyin_step(row: Dict[str, Any], needle: str, key: str, step: int) -> bool:
+    """一套名字（长名称或短名称）的第 ``step`` 档拼音匹配：全等 -> 前缀 -> 音节前缀 -> 音节子串。"""
+    abbreviation = row.get(f"{key}pinyin_abbr") or ""
+    if not abbreviation:
+        return False
+    if step == 0:
+        return abbreviation == needle
+    if step == 1:
+        return abbreviation.startswith(needle)
+    if step == 2:
+        return row[f"{key}pinyin"].startswith(needle)
+    if step == 3:
+        return f" {needle}" in row[f"{key}pinyin_parts"]
+    return needle in row[f"{key}abbr_parts"]
 
 
 class CityRepository:
@@ -470,3 +520,9 @@ class CityRepository:
         if not code or not self._index.available:
             return ""
         return self._index.name_for_code(code)
+
+    def city_for_code(self, code: str) -> Dict[str, Any]:
+        """按编号取一行城市记录（含长名称与短名称）。"""
+        if not code or not self._index.available:
+            return {}
+        return self._index.city_for_code(code)

@@ -23,6 +23,7 @@ from PySide6.QtCore import QEventLoop, QObject, QTimer, Slot  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+from shiboken6 import isValid  # noqa: E402
 
 # ---------------------------------------------------------------- 打桩 SDK
 sdk = types.ModuleType("ClassWidgets.SDK")
@@ -156,6 +157,32 @@ def by_name(name):
     return window.findChild(QObject, name)
 
 
+def _prop_names(obj):
+    meta = obj.metaObject()
+    return {meta.property(i).name() for i in range(meta.propertyCount())}
+
+
+def tooltips_of(item):
+    """挂在 item 下面的 ToolTip（ToolTip 是弹窗，不在视觉树上，只能这么找）。"""
+    return [obj for obj in item.findChildren(QObject)
+            if obj.metaObject().className().startswith("ToolTip") and isValid(obj)]
+
+
+def city_clips():
+    """城市卡片（CityClip 委托）。
+
+    Repeater 委托不是 QObject 子对象，findChildren 到不了；
+    弹窗也不在视觉树上，所以只能认准网格再从它的 childItems 里取。
+    """
+    clips = []
+    for obj in page.findChildren(QObject):
+        if obj.metaObject().className() != "QQuickGrid":
+            continue
+        clips.extend(child for child in obj.childItems()
+                     if "CityClip" in child.metaObject().className() and isValid(child))
+    return clips
+
+
 def wait_until(predicate, timeout_ms=3000):
     """城市库是异步的：转事件循环等结果回来，顺便证明它没有卡住 GUI 线程。"""
     loop = QEventLoop()
@@ -196,6 +223,18 @@ def run_checks():
                         ("locateButton", "自动定位按钮"),
                         ("cityDialog", "城市对话框")):
         check(f"{label}存在", by_name(name) is not None)
+
+    print("\n=== Tooltip 用的是 RinUI 的 ===")
+    # 光看有没有报错抓不到这个问题：ToolTip.text 附加属性加载时不报任何警告，
+    # 但拿到的是 Qt 自带的样式。只有 RinUI 的 ToolTip 才有下面这几个属性。
+    tips = tooltips_of(by_name("locateButton")) + tooltips_of(by_name("chooseButton"))
+    check("两个按钮各有 ToolTip", len(tips) == 2, f"{len(tips)} 个")
+    check("都是 RinUI 的 ToolTip（带 backgroundColor）",
+          bool(tips) and all("backgroundColor" in _prop_names(t) for t in tips))
+    check("RinUI 的 ToolTip 不会自动消失（timeout=-1）",
+          bool(tips) and all(t.property("timeout") == -1 for t in tips))
+    tip_texts = sorted(t.property("text") for t in tips)
+    check("提示文案正确", tip_texts == sorted(["添加当前位置", "添加城市"]), str(tip_texts))
 
     print("\n=== 后端槽函数 ===")
     check("providers() 返回 5 个", len(plugin.providers()) == 5)
@@ -245,9 +284,22 @@ def run_checks():
     plugin.provinces()
     plugin.citiesIn(0)
     wait_until(lambda: len(provinces) == 34 and len(cities) > 0)
-    check("切换后城市库跟着换", len(provinces) == 34 and cities and cities[0]["name"] == "北京市",
+    check("切换后城市库跟着换", len(provinces) == 34 and cities and cities[0]["name"] == "北京",
           cities[0]["name"] if cities else "")
     check("切换到需要 Key 的源会标记 requiresKey", after["requiresKey"])
+
+    print("\n=== 城市卡片的 Tooltip ===")
+    # 卡片要等城市列表回来才实例化，所以这里才查得到每张卡片上的两个提示
+    clips = city_clips()
+    card_tips = [tip for clip in clips for tip in tooltips_of(clip)]
+    check("每张卡片都有 Tooltip", clips and len(card_tips) == 2 * len(clips),
+          f"{len(clips)} 张卡片 / {len(card_tips)} 个 Tooltip")
+    check("卡片上的 Tooltip 也是 RinUI 的",
+          bool(card_tips) and all("backgroundColor" in _prop_names(t) for t in card_tips))
+    card_texts = [t.property("text") for t in card_tips]
+    check("卡片提示是坐标/数据源两行", any("\n" in (t or "") for t in card_texts),
+          str(next((t for t in card_texts if "\n" in (t or "")), "")))
+    check("卡片操作按钮的提示存在", "城市操作" in card_texts)
 
     print("\n=== 城市对话框 ===")
     dialog = by_name("cityDialog")

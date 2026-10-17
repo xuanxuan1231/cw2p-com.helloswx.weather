@@ -81,7 +81,7 @@ def _qml_to_python(value: Any) -> Any:
     if value.isObject():
         # QJSValue does not expose enumerable keys consistently across Qt
         # versions; these are the keys accepted by addCityRecord().
-        keys = ("id", "name", "code", "mode", "latitude", "longitude", "provider_codes")
+        keys = ("id", "name", "short_name", "code", "mode", "latitude", "longitude", "provider_codes")
         return {
             key: _qml_to_python(value.property(key))
             for key in keys
@@ -305,6 +305,10 @@ class Plugin(CW2Plugin):
         self.api.config.register_plugin_model(self.pid, self.config)
         with self._config_batch():
             service.migrate_cities(self.config)
+            # 城市库改成了长 / 短两套名字，老配置里的旧格式按编号重新对一次
+            named = service.refresh_city_names(self.config.cities, self.config.provider)
+            if named != (self.config.cities or []):
+                self.config.cities = named
             service.sync_legacy_location(
                 self.config,
                 next((city for city in self.config.cities if city["id"] == self.defaultCityId()), None),
@@ -459,7 +463,8 @@ class Plugin(CW2Plugin):
             "onlineSearch": bool(provider_class and not provider_class.database),
             "locationMode": location.mode,
             "cityCode": location.code,
-            "cityName": location.label,
+            # 列表 / CityClip 用长名称，这个汇总行也跟着用长名称
+            "cityName": location.name or location.label,
             "latitude": location.latitude,
             "longitude": location.longitude,
             "apiKey": api_keys.get(self.config.provider, ""),
@@ -558,8 +563,15 @@ class Plugin(CW2Plugin):
     @Slot(str, str, float, float)
     def setCity(self, code: str, name: str, latitude: float, longitude: float) -> None:
         """兼容旧调用：添加或更新一个城市并设为默认。"""
+        short_name = ""
+        if code:
+            # 旧调用没有短名称，按编号从城市库里补一个（小组件上显示的就是它）
+            repository = service.repository_for(self.config.provider)
+            row = repository.city_for_code(code) if repository else {}
+            name = name or str(row.get("name") or "")
+            short_name = str(row.get("short_name") or "")
         city = service.normalize_city({
-            "name": name, "code": code, "mode": CITY,
+            "name": name, "short_name": short_name, "code": code, "mode": CITY,
             "latitude": latitude or None, "longitude": longitude or None,
         }, self.config.provider)
         self.addCityRecord(city)

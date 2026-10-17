@@ -7,9 +7,12 @@ GUI 线程（连带 CW 自己的动画）会跟着卡一下。
 城市库是随插件一起发布的静态文件，所以拼音表也离线算好一起发布：运行时只剩
 一次 json 解析（几毫秒）。
 
+长名称（``北京海淀``，列表里显示的）和短名称（``海淀区``，小组件上显示的）都收
+进表里——短名称的首字母缩写（``hd`` -> ``海淀区``）只能靠它命中。
+
     .venv/bin/python tools/build_city_pinyin.py
 
-改了 data/*.db 之后记得重新跑一次。
+先跑 tools/build_city_names.py 重写城市名，再跑本脚本。
 """
 
 import json
@@ -30,14 +33,17 @@ def main() -> None:
         connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
         try:
             with connection:
-                names = [row[0] for row in connection.execute("SELECT name FROM citys")]
+                names = [
+                    name
+                    for row in connection.execute("SELECT name, short_name FROM citys")
+                    for name in row
+                ]
         finally:
             connection.close()
         tables[database.name] = {
-            name.replace(".", " "): " ".join(converter.lazy_pinyin(name.replace(" ", "").replace(".", "")))
-            for name in names
+            name: " ".join(converter.lazy_pinyin(name.replace(" ", ""))) for name in names
         }
-        print(f"{database.name}: {len(names)} 个城市名")
+        print(f"{database.name}: {len(names)} 个名称")
 
     OUTPUT.write_text(
         json.dumps(tables, ensure_ascii=False, separators=(",", ":")),

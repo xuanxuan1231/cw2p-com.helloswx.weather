@@ -13,7 +13,8 @@ class Location:
 
     mode: str = CITY
     code: str = ""
-    name: str = ""
+    name: str = ""  # 长名称，北京海淀
+    short_name: str = ""  # 短名称，海淀区——小组件上显示的就是它
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
@@ -25,8 +26,9 @@ class Location:
 
     @property
     def label(self) -> str:
-        if self.name:
-            return self.name
+        """小组件上显示的城市名：有短名称就用短名称。"""
+        if self.short_name or self.name:
+            return self.short_name or self.name
         if self.mode == COORDINATES and self.configured:
             return f"{self.latitude:.2f}, {self.longitude:.2f}"
         return ""

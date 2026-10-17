@@ -223,16 +223,23 @@ PluginPage {
             Item { Layout.fillWidth: true }
 
             ToolButton {
+                id: locateButton
                 objectName: "locateButton"
                 icon.name: "ic_fluent_location_ripple_20_regular"
                 enabled: page.info && !page.info.locating
                 onClicked: backend.locateAutomatically()
 
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("添加当前位置")
+                // 必须是 ToolTip {} 子对象而不是 ToolTip.text 附加属性：
+                // `import RinUI` 在 `import QtQuick.Controls` 之后，裸名字 ToolTip
+                // 解析到 RinUI 的组件，附加属性那条路拿到的还是 Qt 自带的样式。
+                ToolTip {
+                    text: qsTr("添加当前位置")
+                    visible: locateButton.hovered
+                }
             }
 
             ToolButton {
+                id: chooseButton
                 objectName: "chooseButton"
                 icon.name: "ic_fluent_add_20_regular"
                 onClicked: {
@@ -240,8 +247,10 @@ PluginPage {
                     cityDialog.open()
                 }
 
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("添加城市")
+                ToolTip {
+                    text: qsTr("添加城市")
+                    visible: chooseButton.hovered
+                }
             }
         }
 

@@ -28,21 +28,24 @@ def location_from_config(config: WeatherConfig) -> Location:
             return location_from_city(city, config.provider)
     code = config.city_code or ""
     name = ""
+    short_name = ""
     mode = config.location_mode or CITY
-    
+
     # 通过city_code查询城市名称
     if code and mode == CITY:
         repository = repository_for(config.provider)
         if repository is not None:
-            name = repository.name_for_code(code)
+            row = repository.city_for_code(code)
+            name, short_name = str(row.get("name") or ""), str(row.get("short_name") or "")
     # 坐标模式下，优先使用保存的城市名称
     elif mode == COORDINATES and config.latitude is not None and config.longitude is not None:
         name = config.city_name or f"{config.latitude:.2f}, {config.longitude:.2f}"
-    
+
     return Location(
         mode=mode,
         code=code,
         name=name,
+        short_name=short_name,
         latitude=config.latitude,
         longitude=config.longitude,
     )
@@ -53,7 +56,9 @@ def normalize_city(city: Dict[str, Any], provider_id: str = "") -> Dict[str, Any
     record = dict(city or {})
     record.setdefault("id", str(uuid4()))
     record["id"] = str(record["id"])
-    record["name"] = str(record.get("name") or "").replace(".", " ")
+    record["name"] = str(record.get("name") or "")
+    # 短名称（小组件上显示的）缺了就退回长名称
+    record["short_name"] = str(record.get("short_name") or "") or record["name"]
     record["mode"] = str(record.get("mode") or (COORDINATES if not record.get("code") else CITY))
     if record.get("latitude") is not None:
         record["latitude"] = float(record["latitude"])
@@ -71,6 +76,32 @@ def normalize_city(city: Dict[str, Any], provider_id: str = "") -> Dict[str, Any
     return record
 
 
+def refresh_city_names(cities: List[Dict[str, Any]], provider_id: str = "") -> List[Dict[str, Any]]:
+    """用城市库里的名字覆盖城市记录的名称（升级老配置时用）。
+
+    老配置里的名字是上一版的格式（「北京 海淀」「北京市」「海淀区」，或者在线搜索来的
+    名字），城市库改成长 / 短两套名字之后得按编号重新对一次。对不上的城市原样保留。
+    """
+    repositories: Dict[str, CityRepository] = {}
+    for provider_class in provider_classes():
+        if provider_class.database:
+            repositories[provider_class.id] = CityRepository(provider_class.database)
+
+    refreshed: List[Dict[str, Any]] = []
+    for city in cities:
+        record = dict(city)
+        codes = dict(record.get("provider_codes") or {})
+        # 先按当前数据源的编号找，找不到再退到其它数据源
+        for candidate in ([provider_id] if provider_id in codes else []) + list(codes):
+            row = repositories.get(candidate) and repositories[candidate].city_for_code(codes[candidate])
+            if row:
+                record["name"] = str(row["name"])
+                record["short_name"] = str(row["short_name"])
+                break
+        refreshed.append(record)
+    return refreshed
+
+
 def migrate_cities(config: WeatherConfig) -> List[Dict[str, Any]]:
     """Migrate the legacy single-location fields into the city list once.
 
@@ -81,13 +112,15 @@ def migrate_cities(config: WeatherConfig) -> List[Dict[str, Any]]:
     """
     cities = [normalize_city(item, config.provider) for item in (config.cities or [])]
     if not cities and (config.city_code or config.city_name or config.latitude is not None):
-        legacy_name = config.city_name
-        if not legacy_name and config.city_code:
-            repository = repository_for(config.provider)
-            if repository:
-                legacy_name = repository.name_for_code(config.city_code)
+        legacy_name, legacy_short = config.city_name, ""
+        repository = repository_for(config.provider)
+        row = repository.city_for_code(config.city_code) if repository and config.city_code else {}
+        if row:
+            legacy_name = str(row["name"])
+            legacy_short = str(row["short_name"])
         cities = [normalize_city({
             "name": legacy_name,
+            "short_name": legacy_short,
             "code": config.city_code,
             "mode": config.location_mode,
             "latitude": config.latitude,
@@ -130,11 +163,13 @@ def city_for_provider(city: Dict[str, Any], provider_id: str) -> Optional[Dict[s
 def location_from_city(city: Dict[str, Any], provider_id: str) -> Location:
     resolved = city_for_provider(city, provider_id)
     if not resolved:
-        return Location(name=str((city or {}).get("name") or ""))
+        name = str((city or {}).get("name") or "")
+        return Location(name=name, short_name=str((city or {}).get("short_name") or "") or name)
     return Location(
         mode=str(resolved.get("mode") or CITY),
         code=str(resolved.get("code") or ""),
         name=str(resolved.get("name") or ""),
+        short_name=str(resolved.get("short_name") or ""),
         latitude=resolved.get("latitude"),
         longitude=resolved.get("longitude"),
     )
@@ -410,16 +445,16 @@ def resolve_auto_location(provider_id: str, fix: Dict[str, Any]) -> Optional[Dic
     name = str(fix.get("name") or "").strip()
     repository = repository_for(provider_id)
     if repository is not None and name:
-        for candidate in (name, name.replace("市", "").replace("区", "")):
-            matches = repository.search(candidate, limit=1)
-            if matches:
-                return {
-                    "mode": CITY,
-                    "code": matches[0]["code"],
-                    "name": matches[0]["name"],
-                    "latitude": latitude,
-                    "longitude": longitude,
-                }
+        matches = repository.search(name, limit=1)
+        if matches:
+            return {
+                "mode": CITY,
+                "code": matches[0]["code"],
+                "name": matches[0]["name"],
+                "short_name": matches[0]["short_name"],
+                "latitude": latitude,
+                "longitude": longitude,
+            }
 
     provider_class = get_provider_class(provider_id)
     if provider_class is not None and provider_class.supports_coordinates:

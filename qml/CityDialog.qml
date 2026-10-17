@@ -390,8 +390,10 @@ Dialog {
                     "longitude": lon
                 })
             } else if (root.currentSelection) {
+                // name 是长名称（列表里显示的那个），short_name 是短名称（小组件上显示）
                 backend.addCityRecord({
                     "name": root.currentSelection.name ?? "",
+                    "short_name": root.currentSelection.short_name ?? "",
                     "code": root.currentSelection.code ?? "",
                     "mode": root.currentSelection.mode ?? "city",
                     "latitude": parseFloat(root.currentSelection.latitude ?? 0) || null,
